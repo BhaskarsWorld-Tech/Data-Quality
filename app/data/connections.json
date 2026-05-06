@@ -1,0 +1,36 @@
+[
+  {
+    "id": "conn_1",
+    "name": "Production PostgreSQL",
+    "type": "postgresql",
+    "host": "prod-db.example.com",
+    "port": 5432,
+    "database": "sales_db",
+    "username": "dq_user",
+    "schema": "public",
+    "status": "active",
+    "lastTested": "2026-05-05T10:30:00Z",
+    "createdAt": "2026-04-01T08:00:00Z"
+  },
+  {
+    "id": "conn_2",
+    "name": "Analytics Snowflake",
+    "type": "snowflake",
+    "database": "ANALYTICS",
+    "schema": "DW",
+    "username": "analyst",
+    "status": "active",
+    "lastTested": "2026-05-05T09:00:00Z",
+    "createdAt": "2026-04-10T08:00:00Z"
+  },
+  {
+    "id": "conn_3",
+    "name": "Marketing BigQuery",
+    "type": "bigquery",
+    "database": "marketing-project",
+    "schema": "marketing_data",
+    "status": "error",
+    "lastTested": "2026-05-04T15:00:00Z",
+    "createdAt": "2026-04-15T08:00:00Z"
+  }
+]

@@ -1,0 +1,9 @@
+# Dependencies
+app/node_modules/
+app/.next/
+
+# Env
+app/.env.local
+
+# Misc
+.DS_Store
