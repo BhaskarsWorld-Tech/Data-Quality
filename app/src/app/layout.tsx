@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body style={{ display: 'flex', minHeight: '100vh', background: '#f8fafc' }}>
+      <body style={{ display: 'flex', minHeight: '100vh', background: '#fdfcf7' }}>
         <Sidebar />
         <main style={{ flex: 1, marginLeft: '240px', minHeight: '100vh', overflow: 'auto' }}>
           {children}
