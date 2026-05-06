@@ -115,20 +115,23 @@ const typeFields: Record<ConnectionType, FieldDef[]> = {
     { key: 'database', label: 'Database', placeholder: 'my_database', required: true },
     { key: 'schema', label: 'Schema', placeholder: 'public' },
     { key: 'username', label: 'Username', placeholder: 'db_user' },
+    { key: 'password', label: 'Password', placeholder: '••••••••', type: 'password' },
   ],
   mysql: [
     { key: 'host', label: 'Host', placeholder: 'db.example.com', required: true },
     { key: 'port', label: 'Port', placeholder: '3306', type: 'number' },
     { key: 'database', label: 'Database', placeholder: 'my_database', required: true },
     { key: 'username', label: 'Username', placeholder: 'root' },
+    { key: 'password', label: 'Password', placeholder: '••••••••', type: 'password' },
   ],
   snowflake: [
-    { key: 'account', label: 'Account Identifier', placeholder: 'abc12345.us-east-1', required: true, full: true, hint: 'Found in Snowflake URL: <account>.snowflakecomputing.com' },
+    { key: 'account', label: 'Account Identifier', placeholder: 'abc12345.us-east-1', required: true, full: true, hint: 'Found in your Snowflake URL: <account>.snowflakecomputing.com' },
     { key: 'warehouse', label: 'Warehouse', placeholder: 'COMPUTE_WH', required: true },
     { key: 'role', label: 'Role', placeholder: 'SYSADMIN' },
     { key: 'database', label: 'Database', placeholder: 'MY_DATABASE', required: true },
     { key: 'schema', label: 'Schema', placeholder: 'PUBLIC' },
-    { key: 'username', label: 'Username', placeholder: 'SNOWFLAKE_USER' },
+    { key: 'username', label: 'Username', placeholder: 'SNOWFLAKE_USER', required: true },
+    { key: 'password', label: 'Password', placeholder: '••••••••', type: 'password', required: true },
   ],
   bigquery: [
     { key: 'project', label: 'Project ID', placeholder: 'my-gcp-project-123', required: true, full: true },
@@ -141,6 +144,7 @@ const typeFields: Record<ConnectionType, FieldDef[]> = {
     { key: 'database', label: 'Database', placeholder: 'dev', required: true },
     { key: 'schema', label: 'Schema', placeholder: 'public' },
     { key: 'username', label: 'Username', placeholder: 'awsuser' },
+    { key: 'password', label: 'Password', placeholder: '••••••••', type: 'password' },
   ],
   mongodb: [
     { key: 'connectionString', label: 'Connection String', placeholder: 'mongodb+srv://user:pass@cluster.mongodb.net/db', required: true, full: true, hint: 'Full MongoDB URI including credentials' },
