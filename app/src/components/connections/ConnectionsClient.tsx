@@ -147,19 +147,24 @@ const typeFields: Record<ConnectionType, FieldDef[]> = {
     { key: 'password', label: 'Password', placeholder: '••••••••', type: 'password' },
   ],
   mongodb: [
-    { key: 'connectionString', label: 'Connection String', placeholder: 'mongodb+srv://user:pass@cluster.mongodb.net/db', required: true, full: true, hint: 'Full MongoDB URI including credentials' },
+    { key: 'connectionString', label: 'Connection String', placeholder: 'mongodb+srv://user:pass@cluster.mongodb.net/db', required: true, full: true, hint: 'Full MongoDB URI — include username & password directly in the URI, or use the fields below' },
     { key: 'database', label: 'Database Name', placeholder: 'my_database', required: true },
+    { key: 'username', label: 'Username (optional)', placeholder: 'mongo_user' },
+    { key: 'password', label: 'Password (optional)', placeholder: '••••••••', type: 'password' },
   ],
   csv: [
     { key: 'filePath', label: 'File Path or URL', placeholder: '/data/file.csv  or  https://example.com/data.csv', required: true, full: true },
     { key: 'delimiter', label: 'Delimiter', placeholder: ', (comma)' },
     { key: 'schema', label: 'Sheet / Table Name', placeholder: 'Sheet1' },
+    { key: 'username', label: 'Username (if auth required)', placeholder: 'user' },
+    { key: 'password', label: 'Password (if auth required)', placeholder: '••••••••', type: 'password' },
   ],
   api: [
     { key: 'host', label: 'Base URL', placeholder: 'https://api.example.com', required: true, full: true },
-    { key: 'schema', label: 'Auth Type', placeholder: 'bearer | api-key | none' },
+    { key: 'schema', label: 'Auth Type', placeholder: 'bearer | api-key | basic | none' },
     { key: 'database', label: 'Data Endpoint', placeholder: '/v1/data' },
-    { key: 'username', label: 'API Key / Token', placeholder: 'sk-...' },
+    { key: 'username', label: 'API Key / Username', placeholder: 'sk-... or api_user' },
+    { key: 'password', label: 'API Secret / Password', placeholder: '••••••••', type: 'password' },
   ],
 }
 
