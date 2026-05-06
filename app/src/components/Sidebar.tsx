@@ -31,6 +31,7 @@ const icons = {
   reports: <Icon d="M9 19V6a1 1 0 011-1h4a1 1 0 011 1v13M5 19V11a1 1 0 011-1h3v9M19 19v-5a1 1 0 00-1-1h-3v6M3 19h18" />,
   domains: <Icon d="M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-9c2.5 3 4 6 4 9s-1.5 6-4 9c-2.5-3-4-6-4-9s1.5-6 4-9zM3 12h18" />,
   settings: <Icon d="M10.3 3.5l-.4 1.7a7.5 7.5 0 00-1.6.7L6.6 5l-1.6 1.6 1 1.7c-.3.5-.5 1-.7 1.6l-1.7.4v2.3l1.7.4c.2.6.4 1.1.7 1.6l-1 1.7L6.6 19l1.7-.9c.5.3 1 .5 1.6.7l.4 1.7h2.3l.4-1.7c.6-.2 1.1-.4 1.6-.7l1.7.9 1.6-1.6-.9-1.7c.3-.5.5-1 .7-1.6l1.7-.4v-2.3l-1.7-.4c-.2-.6-.4-1.1-.7-1.6l.9-1.7-1.6-1.6-1.7.9c-.5-.3-1-.5-1.6-.7l-.4-1.7h-2.3zm1.2 5.5a3 3 0 110 6 3 3 0 010-6z" />,
+  architecture: <Icon d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2zM22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z" />,
 }
 
 const sections: NavSection[] = [
@@ -69,6 +70,7 @@ const sections: NavSection[] = [
     items: [
       { href: '/reports', label: 'Reports', icon: icons.reports },
       { href: '/domains', label: 'Domain Management', icon: icons.domains },
+      { href: '/architecture', label: 'Architecture', icon: icons.architecture },
       { href: '/settings', label: 'Settings', icon: icons.settings },
     ]
   }

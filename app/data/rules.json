@@ -86,7 +86,7 @@
     "parameters": {
       "minRows": 1000
     },
-    "enabled": false,
+    "enabled": true,
     "severity": "medium",
     "createdAt": "2026-04-12T08:00:00Z"
   }
