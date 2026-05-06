@@ -192,6 +192,7 @@ type FormState = Record<string, string> & { name: string; type: ConnectionType }
 export default function ConnectionsClient({ initialConnections }: Props) {
   const [connections, setConnections] = useState(initialConnections)
   const [showModal, setShowModal] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState<FormState>({ name: '', type: 'postgresql' })
   const [testing, setTesting] = useState<string | null>(null)
@@ -207,7 +208,22 @@ export default function ConnectionsClient({ initialConnections }: Props) {
 
   function resetForm() {
     setForm({ name: '', type: 'postgresql' })
+    setEditingId(null)
     setShowModal(false)
+  }
+
+  function openEdit(conn: Connection) {
+    // Pre-fill form with all existing connection fields
+    const filled: FormState = { name: conn.name, type: conn.type }
+    const connRecord = conn as unknown as Record<string, unknown>
+    typeFields[conn.type]?.forEach(f => {
+      if (connRecord[f.key] !== undefined && connRecord[f.key] !== null) {
+        filled[f.key] = String(connRecord[f.key])
+      }
+    })
+    setForm(filled)
+    setEditingId(conn.id)
+    setShowModal(true)
   }
 
   async function save() {
@@ -215,12 +231,25 @@ export default function ConnectionsClient({ initialConnections }: Props) {
     setSaving(true)
     const payload: Record<string, unknown> = { ...form }
     if (form.port) payload.port = parseInt(form.port)
-    const res = await fetch('/api/connections', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-    const newConn = await res.json()
-    setConnections(prev => [...prev, newConn])
+
+    if (editingId) {
+      // UPDATE existing connection
+      const res = await fetch('/api/connections', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: editingId, ...payload })
+      })
+      const updated = await res.json()
+      setConnections(prev => prev.map(c => c.id === editingId ? updated : c))
+    } else {
+      // CREATE new connection
+      const res = await fetch('/api/connections', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      const newConn = await res.json()
+      setConnections(prev => [...prev, newConn])
+    }
+
     resetForm()
     setSaving(false)
     router.refresh()
@@ -363,10 +392,14 @@ export default function ConnectionsClient({ initialConnections }: Props) {
                 }}>
                   {testing === conn.id
                     ? <><span style={{ display:'inline-block', animation:'spin 1s linear infinite' }}>⟳</span> Testing…</>
-                    : '🔗 Test Connection'}
+                    : '🔗 Test'}
                 </button>
+                <button onClick={() => openEdit(conn)} style={{
+                  padding: '7px 12px', borderRadius: '7px', border: '1px solid #dbeafe',
+                  background: '#fff', color: '#2563eb', fontSize: '12px', cursor: 'pointer', fontWeight: 500
+                }}>✏️ Edit</button>
                 <button onClick={() => deleteConn(conn.id)} style={{
-                  padding: '7px 12px', borderRadius: '7px', border: '1px solid #fee2e2',
+                  padding: '7px 10px', borderRadius: '7px', border: '1px solid #fee2e2',
                   background: '#fff', color: '#ef4444', fontSize: '12px', cursor: 'pointer'
                 }}>🗑</button>
               </div>
@@ -400,8 +433,12 @@ export default function ConnectionsClient({ initialConnections }: Props) {
             {/* Modal Header */}
             <div style={{ padding: '22px 24px', borderBottom: '1px solid #ebe8df', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
-                <div style={{ fontSize: '17px', fontWeight: 700, color: '#1a1a1a' }}>Add Connection</div>
-                <div style={{ fontSize: '12.5px', color: '#64748b', marginTop: '2px' }}>Connect a new data source to DataGuard</div>
+                <div style={{ fontSize: '17px', fontWeight: 700, color: '#1a1a1a' }}>
+                  {editingId ? '✏️ Edit Connection' : 'Add Connection'}
+                </div>
+                <div style={{ fontSize: '12.5px', color: '#64748b', marginTop: '2px' }}>
+                  {editingId ? 'Update credentials or settings for this connection' : 'Connect a new data source to DataGuard'}
+                </div>
               </div>
               <button onClick={resetForm} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', width: '30px', height: '30px', borderRadius: '8px', cursor: 'pointer', color: '#64748b', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
             </div>
@@ -413,23 +450,32 @@ export default function ConnectionsClient({ initialConnections }: Props) {
                 <input value={form.name} onChange={e => setField('name', e.target.value)} placeholder="e.g. Production Snowflake" style={inp()} />
               </div>
 
-              {/* Type selector - visual cards */}
-              <div>
-                <label style={lbl}>Database Type *</label>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
-                  {CONNECTION_TYPES.map(t => (
-                    <button key={t.value} onClick={() => setField('type', t.value)} style={{
-                      padding: '10px 6px', borderRadius: '8px', border: '1px solid',
-                      borderColor: form.type === t.value ? t.color : '#e2e8f0',
-                      background: form.type === t.value ? `${t.color}12` : '#fafaf9',
-                      cursor: 'pointer', textAlign: 'center', transition: 'all 0.15s'
-                    }}>
-                      <div style={{ fontSize: '20px', marginBottom: '4px' }}>{connectionIcons[t.value]}</div>
-                      <div style={{ fontSize: '10.5px', fontWeight: form.type === t.value ? 700 : 500, color: form.type === t.value ? t.color : '#64748b' }}>{t.label}</div>
-                    </button>
-                  ))}
+              {/* Type selector — locked when editing */}
+              {editingId ? (
+                <div style={{ background: '#fafaf9', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '18px' }}>{connectionIcons[form.type]}</span>
+                  <div style={{ fontSize: '12.5px', color: '#475569' }}>
+                    <strong>{CONNECTION_TYPES.find(t => t.value === form.type)?.label}</strong> — type cannot be changed after creation
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div>
+                  <label style={lbl}>Database Type *</label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
+                    {CONNECTION_TYPES.map(t => (
+                      <button key={t.value} onClick={() => setField('type', t.value)} style={{
+                        padding: '10px 6px', borderRadius: '8px', border: '1px solid',
+                        borderColor: form.type === t.value ? t.color : '#e2e8f0',
+                        background: form.type === t.value ? `${t.color}12` : '#fafaf9',
+                        cursor: 'pointer', textAlign: 'center', transition: 'all 0.15s'
+                      }}>
+                        <div style={{ fontSize: '20px', marginBottom: '4px' }}>{connectionIcons[t.value]}</div>
+                        <div style={{ fontSize: '10.5px', fontWeight: form.type === t.value ? 700 : 500, color: form.type === t.value ? t.color : '#64748b' }}>{t.label}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Type info banner */}
               {connInfo && (
@@ -468,7 +514,7 @@ export default function ConnectionsClient({ initialConnections }: Props) {
                   cursor: form.name ? 'pointer' : 'not-allowed',
                   background: form.name ? '#2563eb' : '#e2e8f0',
                   color: form.name ? '#fff' : '#94a3b8'
-                }}>{saving ? '⏳ Saving...' : '+ Add Connection'}</button>
+                }}>{saving ? '⏳ Saving...' : editingId ? '✓ Save Changes' : '+ Add Connection'}</button>
               </div>
             </div>
           </div>
