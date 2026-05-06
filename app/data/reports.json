@@ -220,5 +220,116 @@
         "score": 92
       }
     ]
+  },
+  {
+    "id": "report_1778032586463_tisjd3qln",
+    "name": "Quality Check - 5/5/2026",
+    "overallScore": 92,
+    "totalChecks": 5,
+    "passed": 0,
+    "failed": 1,
+    "warnings": 4,
+    "executedAt": "2026-05-06T01:56:26.463Z",
+    "results": [
+      {
+        "ruleId": "rule_1",
+        "ruleName": "Customer Email Not Null",
+        "connectionName": "Production PostgreSQL",
+        "tableName": "customers",
+        "columnName": "email",
+        "status": "warning",
+        "score": 96.3,
+        "recordsChecked": 91187,
+        "recordsFailed": 0,
+        "executedAt": "2026-05-06T01:56:26.462Z",
+        "duration": 2095,
+        "details": "Checked 91,187 records"
+      },
+      {
+        "ruleId": "rule_2",
+        "ruleName": "Customer ID Uniqueness",
+        "connectionName": "Production PostgreSQL",
+        "tableName": "customers",
+        "columnName": "customer_id",
+        "status": "failed",
+        "score": 85.4,
+        "recordsChecked": 56386,
+        "recordsFailed": 8220,
+        "executedAt": "2026-05-06T01:56:26.462Z",
+        "duration": 647,
+        "details": "Checked 56,386 records"
+      },
+      {
+        "ruleId": "rule_3",
+        "ruleName": "Order Amount Range",
+        "connectionName": "Production PostgreSQL",
+        "tableName": "orders",
+        "columnName": "amount",
+        "status": "warning",
+        "score": 91.3,
+        "recordsChecked": 99473,
+        "recordsFailed": 8660,
+        "executedAt": "2026-05-06T01:56:26.462Z",
+        "duration": 561,
+        "details": "Checked 99,473 records"
+      },
+      {
+        "ruleId": "rule_4",
+        "ruleName": "Email Format Validation",
+        "connectionName": "Production PostgreSQL",
+        "tableName": "customers",
+        "columnName": "email",
+        "status": "warning",
+        "score": 95.1,
+        "recordsChecked": 64580,
+        "recordsFailed": 0,
+        "executedAt": "2026-05-06T01:56:26.462Z",
+        "duration": 2144,
+        "details": "Checked 64,580 records"
+      },
+      {
+        "ruleId": "rule_5",
+        "ruleName": "Sales Data Freshness",
+        "connectionName": "Analytics Snowflake",
+        "tableName": "fact_sales",
+        "status": "warning",
+        "score": 93.8,
+        "recordsChecked": 61254,
+        "recordsFailed": 3792,
+        "executedAt": "2026-05-06T01:56:26.462Z",
+        "duration": 2435,
+        "details": "Checked 61,254 records"
+      }
+    ],
+    "trend": [
+      {
+        "date": "Apr 29",
+        "score": 92
+      },
+      {
+        "date": "Apr 30",
+        "score": 91
+      },
+      {
+        "date": "May 1",
+        "score": 91
+      },
+      {
+        "date": "May 2",
+        "score": 92
+      },
+      {
+        "date": "May 3",
+        "score": 92
+      },
+      {
+        "date": "May 4",
+        "score": 88
+      },
+      {
+        "date": "May 5",
+        "score": 92
+      }
+    ]
   }
 ]

@@ -4,16 +4,83 @@ import { Connection, ConnectionType } from '@/lib/types'
 import { formatDateTime, connectionIcons } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
 
-const CONNECTION_TYPES: { value: ConnectionType; label: string }[] = [
-  { value: 'postgresql', label: 'PostgreSQL' },
-  { value: 'mysql', label: 'MySQL' },
-  { value: 'bigquery', label: 'BigQuery' },
-  { value: 'snowflake', label: 'Snowflake' },
-  { value: 'redshift', label: 'Redshift' },
-  { value: 'mongodb', label: 'MongoDB' },
-  { value: 'csv', label: 'CSV File' },
-  { value: 'api', label: 'REST API' },
+const CONNECTION_TYPES: { value: ConnectionType; label: string; color: string }[] = [
+  { value: 'postgresql', label: 'PostgreSQL', color: '#336791' },
+  { value: 'mysql', label: 'MySQL', color: '#00758f' },
+  { value: 'snowflake', label: 'Snowflake', color: '#29B5E8' },
+  { value: 'bigquery', label: 'BigQuery', color: '#4285F4' },
+  { value: 'redshift', label: 'Redshift', color: '#8C4FFF' },
+  { value: 'mongodb', label: 'MongoDB', color: '#13AA52' },
+  { value: 'csv', label: 'CSV / File', color: '#64748b' },
+  { value: 'api', label: 'REST API', color: '#f59e0b' },
 ]
+
+interface FieldDef {
+  key: string; label: string; placeholder: string
+  required?: boolean; type?: string; full?: boolean; hint?: string
+}
+
+const typeFields: Record<ConnectionType, FieldDef[]> = {
+  postgresql: [
+    { key: 'host', label: 'Host', placeholder: 'db.example.com', required: true },
+    { key: 'port', label: 'Port', placeholder: '5432', type: 'number' },
+    { key: 'database', label: 'Database', placeholder: 'my_database', required: true },
+    { key: 'schema', label: 'Schema', placeholder: 'public' },
+    { key: 'username', label: 'Username', placeholder: 'db_user' },
+  ],
+  mysql: [
+    { key: 'host', label: 'Host', placeholder: 'db.example.com', required: true },
+    { key: 'port', label: 'Port', placeholder: '3306', type: 'number' },
+    { key: 'database', label: 'Database', placeholder: 'my_database', required: true },
+    { key: 'username', label: 'Username', placeholder: 'root' },
+  ],
+  snowflake: [
+    { key: 'account', label: 'Account Identifier', placeholder: 'abc12345.us-east-1', required: true, full: true, hint: 'Found in Snowflake URL: <account>.snowflakecomputing.com' },
+    { key: 'warehouse', label: 'Warehouse', placeholder: 'COMPUTE_WH', required: true },
+    { key: 'role', label: 'Role', placeholder: 'SYSADMIN' },
+    { key: 'database', label: 'Database', placeholder: 'MY_DATABASE', required: true },
+    { key: 'schema', label: 'Schema', placeholder: 'PUBLIC' },
+    { key: 'username', label: 'Username', placeholder: 'SNOWFLAKE_USER' },
+  ],
+  bigquery: [
+    { key: 'project', label: 'Project ID', placeholder: 'my-gcp-project-123', required: true, full: true },
+    { key: 'database', label: 'Dataset', placeholder: 'my_dataset' },
+    { key: 'keyFile', label: 'Service Account Key Path', placeholder: '/path/to/service-account.json', full: true, hint: 'Or set GOOGLE_APPLICATION_CREDENTIALS env variable' },
+  ],
+  redshift: [
+    { key: 'host', label: 'Cluster Endpoint', placeholder: 'cluster.abc123.us-east-1.redshift.amazonaws.com', required: true, full: true },
+    { key: 'port', label: 'Port', placeholder: '5439', type: 'number' },
+    { key: 'database', label: 'Database', placeholder: 'dev', required: true },
+    { key: 'schema', label: 'Schema', placeholder: 'public' },
+    { key: 'username', label: 'Username', placeholder: 'awsuser' },
+  ],
+  mongodb: [
+    { key: 'connectionString', label: 'Connection String', placeholder: 'mongodb+srv://user:pass@cluster.mongodb.net/db', required: true, full: true, hint: 'Full MongoDB URI including credentials' },
+    { key: 'database', label: 'Database Name', placeholder: 'my_database', required: true },
+  ],
+  csv: [
+    { key: 'filePath', label: 'File Path or URL', placeholder: '/data/file.csv  or  https://example.com/data.csv', required: true, full: true },
+    { key: 'delimiter', label: 'Delimiter', placeholder: ', (comma)' },
+    { key: 'schema', label: 'Sheet / Table Name', placeholder: 'Sheet1' },
+  ],
+  api: [
+    { key: 'host', label: 'Base URL', placeholder: 'https://api.example.com', required: true, full: true },
+    { key: 'schema', label: 'Auth Type', placeholder: 'bearer | api-key | none' },
+    { key: 'database', label: 'Data Endpoint', placeholder: '/v1/data' },
+    { key: 'username', label: 'API Key / Token', placeholder: 'sk-...' },
+  ],
+}
+
+const typeInfo: Record<ConnectionType, { desc: string; docUrl: string }> = {
+  postgresql: { desc: 'Open-source relational database', docUrl: '#' },
+  mysql: { desc: 'Popular open-source RDBMS', docUrl: '#' },
+  snowflake: { desc: 'Cloud data warehouse platform', docUrl: '#' },
+  bigquery: { desc: 'Google serverless data warehouse', docUrl: '#' },
+  redshift: { desc: 'AWS cloud data warehouse', docUrl: '#' },
+  mongodb: { desc: 'Document-oriented NoSQL database', docUrl: '#' },
+  csv: { desc: 'Flat file (CSV, TSV, Excel)', docUrl: '#' },
+  api: { desc: 'REST API data source', docUrl: '#' },
+}
 
 const statusBadge = {
   active: { bg: '#dcfce7', color: '#16a34a', dot: '#16a34a', label: 'Active' },
@@ -23,27 +90,48 @@ const statusBadge = {
 
 interface Props { initialConnections: Connection[] }
 
+type FormState = Record<string, string> & { name: string; type: ConnectionType }
+
 export default function ConnectionsClient({ initialConnections }: Props) {
   const [connections, setConnections] = useState(initialConnections)
   const [showModal, setShowModal] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState({ name: '', type: 'postgresql' as ConnectionType, host: '', port: '', database: '', username: '', schema: '' })
+  const [form, setForm] = useState<FormState>({ name: '', type: 'postgresql' })
+  const [testing, setTesting] = useState<string | null>(null)
   const router = useRouter()
 
+  const fields = typeFields[form.type] || []
+  const connInfo = typeInfo[form.type]
+
+  function setField(key: string, value: string) {
+    setForm(f => ({ ...f, [key]: value }))
+  }
+
+  function resetForm() {
+    setForm({ name: '', type: 'postgresql' })
+    setShowModal(false)
+  }
+
   async function save() {
-    if (!form.name || !form.type) return
+    if (!form.name) return
     setSaving(true)
+    const payload: Record<string, unknown> = { ...form }
+    if (form.port) payload.port = parseInt(form.port)
     const res = await fetch('/api/connections', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...form, port: form.port ? parseInt(form.port) : undefined })
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
     })
     const newConn = await res.json()
     setConnections(prev => [...prev, newConn])
-    setShowModal(false)
-    setForm({ name: '', type: 'postgresql', host: '', port: '', database: '', username: '', schema: '' })
+    resetForm()
     setSaving(false)
     router.refresh()
+  }
+
+  async function testConn(id: string) {
+    setTesting(id)
+    await new Promise(r => setTimeout(r, 1500))
+    setTesting(null)
   }
 
   async function deleteConn(id: string) {
@@ -53,146 +141,197 @@ export default function ConnectionsClient({ initialConnections }: Props) {
     router.refresh()
   }
 
-  const inp = (style?: React.CSSProperties): React.CSSProperties => ({
-    width: '100%', padding: '10px 12px', borderRadius: '10px', border: '1px solid #e2e8f0',
-    fontSize: '14px', color: '#0f172a', background: '#f8fafc', outline: 'none', ...style
+  const inp = (full?: boolean): React.CSSProperties => ({
+    width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #e2e8f0',
+    fontSize: '13px', color: '#0f172a', background: '#fafaf9', outline: 'none',
+    gridColumn: full ? '1 / -1' : undefined
   })
 
+  const selectedType = CONNECTION_TYPES.find(t => t.value === form.type)
+
   return (
-    <div style={{ padding: '32px', maxWidth: '1100px' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '28px' }}>
+    <div style={{ padding: '28px 36px', maxWidth: '1200px' }}>
+      <div style={{ fontSize: '12.5px', color: '#94a3b8', marginBottom: '8px' }}>
+        Workspace · <span style={{ color: '#475569' }}>Analytics platform</span>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
         <div>
-          <h1 style={{ fontSize: '26px', fontWeight: 800, color: '#0f172a', margin: 0 }}>Connections</h1>
-          <p style={{ color: '#64748b', fontSize: '14px', margin: '4px 0 0' }}>{connections.length} data source{connections.length !== 1 ? 's' : ''} configured</p>
+          <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Connections</h1>
+          <p style={{ color: '#64748b', fontSize: '13px', margin: '4px 0 0' }}>
+            {connections.length} data source{connections.length !== 1 ? 's' : ''} — {connections.filter(c => c.status === 'active').length} active
+          </p>
         </div>
         <button onClick={() => setShowModal(true)} style={{
-          background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', color: '#fff', border: 'none',
-          padding: '12px 22px', borderRadius: '12px', fontSize: '14px', fontWeight: 600,
-          cursor: 'pointer', boxShadow: '0 4px 14px rgba(99,102,241,0.35)'
+          background: '#dbeafe', border: '1px solid #93c5fd', padding: '8px 16px',
+          borderRadius: '8px', fontSize: '13px', fontWeight: 600, color: '#2563eb', cursor: 'pointer'
         }}>+ Add Connection</button>
       </div>
 
       {/* Connection Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '14px' }}>
         {connections.map(conn => {
           const s = statusBadge[conn.status]
           const icon = connectionIcons[conn.type] || '🔌'
+          const typeColor = CONNECTION_TYPES.find(t => t.value === conn.type)?.color || '#64748b'
+          const fields = typeFields[conn.type] || []
+
           return (
-            <div key={conn.id} className="fade-in" style={{
-              background: '#fff', borderRadius: '16px', padding: '20px',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.06)', border: '1px solid #f1f5f9',
-              transition: 'transform 0.2s, box-shadow 0.2s'
+            <div key={conn.id} style={{
+              background: '#fff', borderRadius: '12px', padding: '20px',
+              border: '1px solid #ebe8df', transition: 'box-shadow 0.2s'
             }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '14px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div style={{ width: '44px', height: '44px', borderRadius: '12px', background: '#f8fafc', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px' }}>{icon}</div>
+                  <div style={{
+                    width: '42px', height: '42px', borderRadius: '10px',
+                    background: `${typeColor}18`, border: `1px solid ${typeColor}30`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '22px'
+                  }}>{icon}</div>
                   <div>
-                    <div style={{ fontWeight: 700, color: '#0f172a', fontSize: '15px' }}>{conn.name}</div>
-                    <div style={{ color: '#64748b', fontSize: '12px', textTransform: 'capitalize' }}>{conn.type}</div>
+                    <div style={{ fontWeight: 700, color: '#1a1a1a', fontSize: '14px' }}>{conn.name}</div>
+                    <div style={{ color: typeColor, fontSize: '11.5px', fontWeight: 600, textTransform: 'capitalize' }}>
+                      {CONNECTION_TYPES.find(t => t.value === conn.type)?.label || conn.type}
+                    </div>
                   </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: s.bg, color: s.color, padding: '4px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: 600 }}>
-                  <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: s.dot }} />
-                  {s.label}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', background: s.bg, color: s.color, padding: '3px 10px', borderRadius: '20px', fontSize: '11.5px', fontWeight: 600 }}>
+                  <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: s.dot }} />{s.label}
                 </div>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '16px' }}>
-                {conn.host && <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', gap: '6px' }}><span style={{ color: '#94a3b8' }}>Host:</span>{conn.host}{conn.port ? `:${conn.port}` : ''}</div>}
-                {conn.database && <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', gap: '6px' }}><span style={{ color: '#94a3b8' }}>Database:</span>{conn.database}</div>}
-                {conn.schema && <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', gap: '6px' }}><span style={{ color: '#94a3b8' }}>Schema:</span>{conn.schema}</div>}
-                {conn.lastTested && <div style={{ fontSize: '12px', color: '#64748b', display: 'flex', gap: '6px' }}><span style={{ color: '#94a3b8' }}>Tested:</span>{formatDateTime(conn.lastTested)}</div>}
+              {/* Type-specific details */}
+              <div style={{ background: '#fafaf9', borderRadius: '8px', padding: '10px 12px', marginBottom: '14px', border: '1px solid #ebe8df' }}>
+                {fields.filter(f => !['username', 'keyFile', 'connectionString'].includes(f.key)).slice(0, 3).map(f => {
+                  const val = (conn as unknown as Record<string, unknown>)[f.key] as string | undefined
+                  return val ? (
+                    <div key={f.key} style={{ display: 'flex', gap: '8px', fontSize: '12px', color: '#475569', marginBottom: '3px' }}>
+                      <span style={{ color: '#94a3b8', minWidth: '70px' }}>{f.label}:</span>
+                      <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{val}</span>
+                    </div>
+                  ) : null
+                })}
+                {conn.host && !fields.find(f => f.key === 'account') && (
+                  <div style={{ fontSize: '12px', color: '#475569', marginBottom: '3px' }}>
+                    <span style={{ color: '#94a3b8' }}>Host: </span>
+                    <span style={{ fontWeight: 500 }}>{conn.host}{conn.port ? `:${conn.port}` : ''}</span>
+                  </div>
+                )}
+                {conn.database && (
+                  <div style={{ fontSize: '12px', color: '#475569', marginBottom: '3px' }}>
+                    <span style={{ color: '#94a3b8' }}>Database: </span>
+                    <span style={{ fontWeight: 500 }}>{conn.database}</span>
+                  </div>
+                )}
+                {conn.lastTested && (
+                  <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>
+                    Last tested: {formatDateTime(conn.lastTested)}
+                  </div>
+                )}
               </div>
 
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button style={{ flex: 1, padding: '8px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: '12px', fontWeight: 500, cursor: 'pointer' }}>
-                  🔗 Test Connection
+                <button onClick={() => testConn(conn.id)} style={{
+                  flex: 1, padding: '7px', borderRadius: '7px', border: '1px solid #e2e8f0',
+                  background: '#fff', color: '#475569', fontSize: '12px', fontWeight: 500, cursor: 'pointer'
+                }}>
+                  {testing === conn.id ? '⏳ Testing...' : '🔗 Test Connection'}
                 </button>
-                <button onClick={() => deleteConn(conn.id)} style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #fee2e2', background: '#fff', color: '#ef4444', fontSize: '12px', cursor: 'pointer' }}>
-                  🗑
-                </button>
+                <button onClick={() => deleteConn(conn.id)} style={{
+                  padding: '7px 12px', borderRadius: '7px', border: '1px solid #fee2e2',
+                  background: '#fff', color: '#ef4444', fontSize: '12px', cursor: 'pointer'
+                }}>🗑</button>
               </div>
             </div>
           )
         })}
 
-        {/* Empty state */}
         {connections.length === 0 && (
-          <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '60px', background: '#fff', borderRadius: '16px', border: '2px dashed #e2e8f0' }}>
+          <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '60px', background: '#fff', borderRadius: '14px', border: '2px dashed #e2e8f0' }}>
             <div style={{ fontSize: '40px', marginBottom: '12px' }}>🔌</div>
-            <div style={{ fontSize: '16px', fontWeight: 600, color: '#0f172a', marginBottom: '6px' }}>No connections yet</div>
-            <div style={{ color: '#64748b', fontSize: '14px', marginBottom: '20px' }}>Add your first data source to start monitoring quality</div>
-            <button onClick={() => setShowModal(true)} style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '10px', fontSize: '14px', cursor: 'pointer' }}>
-              + Add Connection
-            </button>
+            <div style={{ fontSize: '16px', fontWeight: 600, color: '#1a1a1a', marginBottom: '8px' }}>No connections yet</div>
+            <div style={{ color: '#64748b', fontSize: '13px', marginBottom: '20px' }}>Add your first data source to start monitoring quality</div>
+            <button onClick={() => setShowModal(true)} style={{ background: '#dbeafe', border: '1px solid #93c5fd', padding: '10px 20px', borderRadius: '8px', fontSize: '13px', fontWeight: 600, color: '#2563eb', cursor: 'pointer' }}>+ Add Connection</button>
           </div>
         )}
       </div>
 
       {/* Modal */}
       {showModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, backdropFilter: 'blur(4px)' }}>
-          <div className="slide-up" style={{ background: '#fff', borderRadius: '20px', padding: '28px', width: '480px', boxShadow: '0 20px 60px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, backdropFilter: 'blur(4px)' }}>
+          <div style={{ background: '#fff', borderRadius: '16px', width: '540px', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
+            {/* Modal Header */}
+            <div style={{ padding: '22px 24px', borderBottom: '1px solid #ebe8df', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div>
-                <div style={{ fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>Add Connection</div>
-                <div style={{ fontSize: '13px', color: '#64748b' }}>Connect a new data source</div>
+                <div style={{ fontSize: '17px', fontWeight: 700, color: '#1a1a1a' }}>Add Connection</div>
+                <div style={{ fontSize: '12.5px', color: '#64748b', marginTop: '2px' }}>Connect a new data source to DataGuard</div>
               </div>
-              <button onClick={() => setShowModal(false)} style={{ background: '#f8fafc', border: 'none', width: '32px', height: '32px', borderRadius: '8px', cursor: 'pointer', color: '#64748b', fontSize: '16px' }}>✕</button>
+              <button onClick={resetForm} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', width: '30px', height: '30px', borderRadius: '8px', cursor: 'pointer', color: '#64748b', fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {/* Connection name */}
               <div>
-                <label style={{ fontSize: '13px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '6px' }}>Connection Name *</label>
-                <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Production PostgreSQL" style={inp()} />
+                <label style={lbl}>Connection Name *</label>
+                <input value={form.name} onChange={e => setField('name', e.target.value)} placeholder="e.g. Production Snowflake" style={inp()} />
               </div>
 
+              {/* Type selector - visual cards */}
               <div>
-                <label style={{ fontSize: '13px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '6px' }}>Database Type *</label>
-                <select value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value as ConnectionType }))} style={inp()}>
-                  {CONNECTION_TYPES.map(t => <option key={t.value} value={t.value}>{connectionIcons[t.value]} {t.label}</option>)}
-                </select>
+                <label style={lbl}>Database Type *</label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px' }}>
+                  {CONNECTION_TYPES.map(t => (
+                    <button key={t.value} onClick={() => setField('type', t.value)} style={{
+                      padding: '10px 6px', borderRadius: '8px', border: '1px solid',
+                      borderColor: form.type === t.value ? t.color : '#e2e8f0',
+                      background: form.type === t.value ? `${t.color}12` : '#fafaf9',
+                      cursor: 'pointer', textAlign: 'center', transition: 'all 0.15s'
+                    }}>
+                      <div style={{ fontSize: '20px', marginBottom: '4px' }}>{connectionIcons[t.value]}</div>
+                      <div style={{ fontSize: '10.5px', fontWeight: form.type === t.value ? 700 : 500, color: form.type === t.value ? t.color : '#64748b' }}>{t.label}</div>
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px', gap: '12px' }}>
-                <div>
-                  <label style={{ fontSize: '13px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '6px' }}>Host</label>
-                  <input value={form.host} onChange={e => setForm(f => ({ ...f, host: e.target.value }))} placeholder="db.example.com" style={inp()} />
+              {/* Type info banner */}
+              {connInfo && (
+                <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '8px', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '18px' }}>{connectionIcons[form.type]}</span>
+                  <div style={{ fontSize: '12.5px', color: '#0369a1' }}>
+                    <strong>{selectedType?.label}</strong> — {connInfo.desc}
+                  </div>
                 </div>
-                <div>
-                  <label style={{ fontSize: '13px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '6px' }}>Port</label>
-                  <input value={form.port} onChange={e => setForm(f => ({ ...f, port: e.target.value }))} placeholder="5432" style={inp()} />
-                </div>
-              </div>
+              )}
 
+              {/* Dynamic fields per type */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div>
-                  <label style={{ fontSize: '13px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '6px' }}>Database</label>
-                  <input value={form.database} onChange={e => setForm(f => ({ ...f, database: e.target.value }))} placeholder="my_database" style={inp()} />
-                </div>
-                <div>
-                  <label style={{ fontSize: '13px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '6px' }}>Schema</label>
-                  <input value={form.schema} onChange={e => setForm(f => ({ ...f, schema: e.target.value }))} placeholder="public" style={inp()} />
-                </div>
+                {fields.map(f => (
+                  <div key={f.key} style={{ gridColumn: f.full ? '1 / -1' : undefined }}>
+                    <label style={lbl}>
+                      {f.label} {f.required && <span style={{ color: '#ef4444' }}>*</span>}
+                    </label>
+                    <input
+                      value={form[f.key] || ''}
+                      onChange={e => setField(f.key, e.target.value)}
+                      placeholder={f.placeholder}
+                      type={f.type || 'text'}
+                      style={inp(f.full)}
+                    />
+                    {f.hint && <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>{f.hint}</div>}
+                  </div>
+                ))}
               </div>
 
-              <div>
-                <label style={{ fontSize: '13px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '6px' }}>Username</label>
-                <input value={form.username} onChange={e => setForm(f => ({ ...f, username: e.target.value }))} placeholder="db_user" style={inp()} />
-              </div>
-
-              <div style={{ display: 'flex', gap: '12px', paddingTop: '8px' }}>
-                <button onClick={() => setShowModal(false)} style={{ flex: 1, padding: '12px', borderRadius: '10px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: '14px', fontWeight: 500, cursor: 'pointer' }}>
-                  Cancel
-                </button>
+              {/* Buttons */}
+              <div style={{ display: 'flex', gap: '10px', paddingTop: '4px' }}>
+                <button onClick={resetForm} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: '13px', fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
                 <button onClick={save} disabled={saving || !form.name} style={{
-                  flex: 2, padding: '12px', borderRadius: '10px', border: 'none', fontSize: '14px', fontWeight: 600, cursor: form.name ? 'pointer' : 'not-allowed',
-                  background: form.name ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : '#e2e8f0',
+                  flex: 2, padding: '10px', borderRadius: '8px', border: 'none', fontSize: '13px', fontWeight: 600,
+                  cursor: form.name ? 'pointer' : 'not-allowed',
+                  background: form.name ? '#2563eb' : '#e2e8f0',
                   color: form.name ? '#fff' : '#94a3b8'
-                }}>
-                  {saving ? '⏳ Saving...' : '+ Add Connection'}
-                </button>
+                }}>{saving ? '⏳ Saving...' : '+ Add Connection'}</button>
               </div>
             </div>
           </div>
@@ -201,3 +340,5 @@ export default function ConnectionsClient({ initialConnections }: Props) {
     </div>
   )
 }
+
+const lbl: React.CSSProperties = { fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '6px' }

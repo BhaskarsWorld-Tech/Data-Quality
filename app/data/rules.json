@@ -36,7 +36,10 @@
     "connectionId": "conn_1",
     "tableName": "orders",
     "columnName": "amount",
-    "parameters": { "min": 0, "max": 100000 },
+    "parameters": {
+      "min": 0,
+      "max": 100000
+    },
     "enabled": true,
     "severity": "high",
     "createdAt": "2026-04-05T08:00:00Z"
@@ -50,7 +53,9 @@
     "connectionId": "conn_1",
     "tableName": "customers",
     "columnName": "email",
-    "parameters": { "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$" },
+    "parameters": {
+      "pattern": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+    },
     "enabled": true,
     "severity": "high",
     "createdAt": "2026-04-05T08:00:00Z"
@@ -63,7 +68,9 @@
     "type": "freshness",
     "connectionId": "conn_2",
     "tableName": "fact_sales",
-    "parameters": { "maxAgeHours": 24 },
+    "parameters": {
+      "maxAgeHours": 24
+    },
     "enabled": true,
     "severity": "high",
     "createdAt": "2026-04-10T08:00:00Z"
@@ -76,7 +83,9 @@
     "type": "row_count",
     "connectionId": "conn_1",
     "tableName": "orders",
-    "parameters": { "minRows": 1000 },
+    "parameters": {
+      "minRows": 1000
+    },
     "enabled": false,
     "severity": "medium",
     "createdAt": "2026-04-12T08:00:00Z"

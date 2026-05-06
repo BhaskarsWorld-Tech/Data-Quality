@@ -2,6 +2,26 @@
 import { useState, useRef, useEffect } from 'react'
 import { AgentMessage } from '@/lib/types'
 
+// Sparkle AI icon matching the provided design
+function SparkleIcon({ size = 24, white = false }: { size?: number; white?: boolean }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" fill="none">
+      {/* Rounded square outline */}
+      <rect x="10" y="18" width="72" height="72" rx="14" ry="14"
+        stroke={white ? 'white' : 'white'} strokeWidth="7" fill="none" />
+      {/* Big sparkle (bottom-left) */}
+      <path d="M32 68 L36 54 L40 68 L54 72 L40 76 L36 90 L32 76 L18 72 Z"
+        fill={white ? 'white' : 'white'} />
+      {/* Medium sparkle (top-right) */}
+      <path d="M62 30 L65 22 L68 30 L76 33 L68 36 L65 44 L62 36 L54 33 Z"
+        fill={white ? 'white' : 'white'} />
+      {/* Small sparkle dot (top-right corner) */}
+      <path d="M78 18 L80 13 L82 18 L87 20 L82 22 L80 27 L78 22 L73 20 Z"
+        fill={white ? 'white' : 'white'} />
+    </svg>
+  )
+}
+
 function MarkdownText({ text }: { text: string }) {
   const lines = text.split('\n')
   return (
@@ -104,10 +124,11 @@ export default function AgentChat() {
             display: 'flex', alignItems: 'center', gap: '10px'
           }}>
             <div style={{
-              width: '36px', height: '36px', borderRadius: '10px',
-              background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px'
-            }}>🤖</div>
+              width: '38px', height: '38px', borderRadius: '12px',
+              background: 'linear-gradient(135deg, #4f8ef7, #2563eb)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 2px 8px rgba(37,99,235,0.4)'
+            }}><SparkleIcon size={24} white /></div>
             <div>
               <div style={{ color: '#fff', fontWeight: 700, fontSize: '14px' }}>DataGuard AI</div>
               <div style={{ color: '#10b981', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -127,7 +148,7 @@ export default function AgentChat() {
             {messages.map((msg, i) => (
               <div key={i} className="fade-in" style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
                 {msg.role === 'assistant' && (
-                  <div style={{ width: '28px', height: '28px', borderRadius: '8px', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', flexShrink: 0, marginRight: '8px', marginTop: '2px' }}>🤖</div>
+                  <div style={{ width: '28px', height: '28px', borderRadius: '8px', background: 'linear-gradient(135deg, #4f8ef7, #2563eb)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginRight: '8px', marginTop: '2px' }}><SparkleIcon size={18} white /></div>
                 )}
                 <div style={{
                   maxWidth: '85%',
@@ -153,7 +174,7 @@ export default function AgentChat() {
 
             {loading && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <div style={{ width: '28px', height: '28px', borderRadius: '8px', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px' }}>🤖</div>
+                <div style={{ width: '28px', height: '28px', borderRadius: '8px', background: 'linear-gradient(135deg, #4f8ef7, #2563eb)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><SparkleIcon size={18} white /></div>
                 <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', padding: '10px 14px', borderRadius: '16px 16px 16px 4px', display: 'flex', gap: '4px', alignItems: 'center' }}>
                   {[0, 1, 2].map(j => (
                     <div key={j} style={{
@@ -210,14 +231,16 @@ export default function AgentChat() {
       {/* Floating Button */}
       <button onClick={() => setOpen(!open)} style={{
         position: 'fixed', bottom: '20px', right: '20px',
-        width: '54px', height: '54px', borderRadius: '16px', border: 'none',
-        background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-        color: '#fff', fontSize: '24px', cursor: 'pointer', zIndex: 1001,
-        boxShadow: '0 8px 24px rgba(99,102,241,0.4)',
+        width: '56px', height: '56px', borderRadius: '18px', border: 'none',
+        background: 'linear-gradient(145deg, #5b9cf6, #2563eb)',
+        cursor: 'pointer', zIndex: 1001,
+        boxShadow: '0 8px 28px rgba(37,99,235,0.45)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        transition: 'all 0.2s', transform: open ? 'rotate(180deg)' : 'none'
+        transition: 'all 0.25s', transform: open ? 'scale(0.9)' : 'scale(1)'
       }}>
-        {open ? '✕' : '🤖'}
+        {open
+          ? <span style={{ color: '#fff', fontSize: '20px', fontWeight: 300, lineHeight: 1 }}>✕</span>
+          : <SparkleIcon size={32} white />}
       </button>
 
       <style>{`
