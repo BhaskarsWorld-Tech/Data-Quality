@@ -4,14 +4,29 @@ export interface Connection {
   id: string
   name: string
   type: ConnectionType
+  // Common fields
   host?: string
   port?: number
   database?: string
   username?: string
   schema?: string
+  // Snowflake-specific
+  account?: string
+  warehouse?: string
+  role?: string
+  // BigQuery-specific
+  project?: string
+  keyFile?: string
+  // MongoDB / API
+  connectionString?: string
+  baseUrl?: string
+  authType?: string
+  delimiter?: string
+  filePath?: string
   status: 'active' | 'inactive' | 'error'
   lastTested?: string
   createdAt: string
+  [key: string]: unknown   // allow extra fields without TS errors
 }
 
 export type RuleCategory = 'completeness' | 'accuracy' | 'uniqueness' | 'validity' | 'timeliness' | 'consistency'

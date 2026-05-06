@@ -4,6 +4,94 @@ import { Connection, ConnectionType } from '@/lib/types'
 import { formatDateTime, connectionIcons } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
 
+interface TestStep { label: string; status: 'ok' | 'fail' | 'skip'; detail: string }
+interface TestResult {
+  success: boolean; status: string; steps: TestStep[]
+  errorCode?: string; errorMessage?: string; suggestion?: string; latencyMs?: number
+}
+
+function TestResultModal({ result, connName, onClose }: { result: TestResult; connName: string; onClose: () => void }) {
+  const stepIcon = { ok: '✓', fail: '✗', skip: '⊘' }
+  const stepColor = { ok: '#16a34a', fail: '#dc2626', skip: '#94a3b8' }
+  const stepBg   = { ok: '#dcfce7', fail: '#fee2e2', skip: '#f1f5f9' }
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.4)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:300, backdropFilter:'blur(4px)' }}>
+      <div style={{ background:'#fff', borderRadius:'16px', width:'520px', maxHeight:'88vh', overflowY:'auto', boxShadow:'0 24px 64px rgba(0,0,0,0.2)' }}>
+
+        {/* Header */}
+        <div style={{ padding:'20px 24px 16px', borderBottom:'1px solid #ebe8df', display:'flex', alignItems:'center', gap:'12px' }}>
+          <div style={{
+            width:'40px', height:'40px', borderRadius:'12px', flexShrink:0,
+            background: result.success ? '#dcfce7' : '#fee2e2',
+            display:'flex', alignItems:'center', justifyContent:'center', fontSize:'22px'
+          }}>{result.success ? '✅' : '❌'}</div>
+          <div style={{ flex:1 }}>
+            <div style={{ fontWeight:700, fontSize:'16px', color:'#1a1a1a' }}>
+              {result.success ? 'Connection Successful' : 'Connection Failed'}
+            </div>
+            <div style={{ fontSize:'12.5px', color:'#64748b', marginTop:'2px' }}>{connName}</div>
+          </div>
+          <button onClick={onClose} style={{ background:'#f8fafc', border:'1px solid #e2e8f0', width:'30px', height:'30px', borderRadius:'8px', cursor:'pointer', color:'#64748b', fontSize:'14px', display:'flex', alignItems:'center', justifyContent:'center' }}>✕</button>
+        </div>
+
+        <div style={{ padding:'20px 24px', display:'flex', flexDirection:'column', gap:'16px' }}>
+
+          {/* Steps */}
+          <div>
+            <div style={{ fontSize:'11.5px', color:'#94a3b8', fontWeight:600, letterSpacing:'0.06em', marginBottom:'10px' }}>DIAGNOSTIC STEPS</div>
+            <div style={{ display:'flex', flexDirection:'column', gap:'8px' }}>
+              {result.steps.map((step, i) => (
+                <div key={i} style={{ display:'flex', gap:'10px', alignItems:'flex-start', padding:'10px 12px', borderRadius:'8px', background:'#fafaf9', border:'1px solid #ebe8df' }}>
+                  <div style={{ width:'22px', height:'22px', borderRadius:'50%', background:stepBg[step.status], color:stepColor[step.status], display:'flex', alignItems:'center', justifyContent:'center', fontSize:'13px', fontWeight:700, flexShrink:0, marginTop:'1px' }}>
+                    {stepIcon[step.status]}
+                  </div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:'13px', fontWeight:600, color:'#1a1a1a', marginBottom:'2px' }}>{step.label}</div>
+                    <div style={{ fontSize:'12px', color: step.status === 'fail' ? '#dc2626' : '#64748b' }}>{step.detail}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Error details */}
+          {!result.success && result.errorMessage && (
+            <div style={{ background:'#fff7ed', border:'1px solid #fdba74', borderRadius:'10px', padding:'14px 16px' }}>
+              <div style={{ fontSize:'12px', color:'#92400e', fontWeight:600, marginBottom:'6px', display:'flex', alignItems:'center', gap:'6px' }}>
+                <span>⚠</span> Error Details {result.errorCode && <code style={{ background:'#fef3c7', padding:'1px 6px', borderRadius:'4px', fontSize:'11px' }}>{result.errorCode}</code>}
+              </div>
+              <div style={{ fontSize:'13px', color:'#78350f', lineHeight:'1.5' }}>{result.errorMessage}</div>
+            </div>
+          )}
+
+          {/* Suggestion */}
+          {result.suggestion && (
+            <div style={{ background:'#eff6ff', border:'1px solid #93c5fd', borderRadius:'10px', padding:'14px 16px' }}>
+              <div style={{ fontSize:'12px', color:'#1d4ed8', fontWeight:600, marginBottom:'6px' }}>💡 How to fix this</div>
+              <div style={{ fontSize:'13px', color:'#1e40af', lineHeight:'1.5' }}>{result.suggestion}</div>
+            </div>
+          )}
+
+          {/* Latency */}
+          {result.success && result.latencyMs && (
+            <div style={{ background:'#f0fdf4', border:'1px solid #86efac', borderRadius:'10px', padding:'12px 16px', display:'flex', alignItems:'center', gap:'10px' }}>
+              <span style={{ fontSize:'20px' }}>🚀</span>
+              <div style={{ fontSize:'13px', color:'#166534' }}>
+                Connection verified in <strong>{result.latencyMs}ms</strong>. Status updated to <strong>Active</strong>.
+              </div>
+            </div>
+          )}
+
+          <button onClick={onClose} style={{ width:'100%', padding:'11px', borderRadius:'8px', border:'1px solid #e2e8f0', background: result.success ? '#2563eb' : '#fff', color: result.success ? '#fff' : '#64748b', fontSize:'13px', fontWeight:600, cursor:'pointer' }}>
+            {result.success ? '✓ Done' : 'Close & Edit Connection'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 const CONNECTION_TYPES: { value: ConnectionType; label: string; color: string }[] = [
   { value: 'postgresql', label: 'PostgreSQL', color: '#336791' },
   { value: 'mysql', label: 'MySQL', color: '#00758f' },
@@ -98,6 +186,7 @@ export default function ConnectionsClient({ initialConnections }: Props) {
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState<FormState>({ name: '', type: 'postgresql' })
   const [testing, setTesting] = useState<string | null>(null)
+  const [testResult, setTestResult] = useState<{ result: TestResult; connName: string } | null>(null)
   const router = useRouter()
 
   const fields = typeFields[form.type] || []
@@ -128,10 +217,34 @@ export default function ConnectionsClient({ initialConnections }: Props) {
     router.refresh()
   }
 
-  async function testConn(id: string) {
+  async function testConn(id: string, connName: string) {
     setTesting(id)
-    await new Promise(r => setTimeout(r, 1500))
-    setTesting(null)
+    try {
+      const res = await fetch('/api/connections/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ connectionId: id })
+      })
+      const result: TestResult = await res.json()
+      // Refresh connection list to pick up new status
+      const updated = await fetch('/api/connections').then(r => r.json())
+      setConnections(updated)
+      setTestResult({ result, connName })
+    } catch (e: unknown) {
+      setTestResult({
+        result: {
+          success: false, status: 'error',
+          steps: [{ label: 'API call', status: 'fail', detail: (e as Error).message }],
+          errorCode: 'CLIENT_ERROR',
+          errorMessage: 'Could not reach the test endpoint.',
+          suggestion: 'Make sure the dev server is running.'
+        },
+        connName
+      })
+    } finally {
+      setTesting(null)
+      router.refresh()
+    }
   }
 
   async function deleteConn(id: string) {
@@ -151,6 +264,7 @@ export default function ConnectionsClient({ initialConnections }: Props) {
 
   return (
     <div style={{ padding: '28px 36px', maxWidth: '1200px' }}>
+      <style>{`@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
       <div style={{ fontSize: '12.5px', color: '#94a3b8', marginBottom: '8px' }}>
         Workspace · <span style={{ color: '#475569' }}>Analytics platform</span>
       </div>
@@ -231,11 +345,16 @@ export default function ConnectionsClient({ initialConnections }: Props) {
               </div>
 
               <div style={{ display: 'flex', gap: '8px' }}>
-                <button onClick={() => testConn(conn.id)} style={{
+                <button onClick={() => testConn(conn.id, conn.name)} disabled={testing === conn.id} style={{
                   flex: 1, padding: '7px', borderRadius: '7px', border: '1px solid #e2e8f0',
-                  background: '#fff', color: '#475569', fontSize: '12px', fontWeight: 500, cursor: 'pointer'
+                  background: testing === conn.id ? '#f8fafc' : '#fff',
+                  color: testing === conn.id ? '#94a3b8' : '#475569',
+                  fontSize: '12px', fontWeight: 500, cursor: testing === conn.id ? 'not-allowed' : 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
                 }}>
-                  {testing === conn.id ? '⏳ Testing...' : '🔗 Test Connection'}
+                  {testing === conn.id
+                    ? <><span style={{ display:'inline-block', animation:'spin 1s linear infinite' }}>⟳</span> Testing…</>
+                    : '🔗 Test Connection'}
                 </button>
                 <button onClick={() => deleteConn(conn.id)} style={{
                   padding: '7px 12px', borderRadius: '7px', border: '1px solid #fee2e2',
@@ -256,7 +375,16 @@ export default function ConnectionsClient({ initialConnections }: Props) {
         )}
       </div>
 
-      {/* Modal */}
+      {/* Test Result Modal */}
+      {testResult && (
+        <TestResultModal
+          result={testResult.result}
+          connName={testResult.connName}
+          onClose={() => setTestResult(null)}
+        />
+      )}
+
+      {/* Add Connection Modal */}
       {showModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200, backdropFilter: 'blur(4px)' }}>
           <div style={{ background: '#fff', borderRadius: '16px', width: '540px', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
