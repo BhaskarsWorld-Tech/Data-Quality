@@ -83,8 +83,8 @@ export default function ExecutionLogsPage() {
                     <span style={{ ...ss, padding: '3px 8px', borderRadius: '20px', fontSize: '11px', fontWeight: 600 }}>{l.status}</span>
                   </td>
                   <td style={{ padding: '11px 14px', fontWeight: 700, color: scoreColor }}>{l.score}%</td>
-                  <td style={{ padding: '11px 14px', color: '#64748b', fontFamily: 'monospace', fontSize: '12px' }}>{parseInt(l.checked).toLocaleString()}</td>
-                  <td style={{ padding: '11px 14px', color: parseInt(l.failed) > 0 ? '#dc2626' : '#16a34a', fontWeight: 600, fontFamily: 'monospace', fontSize: '12px' }}>{parseInt(l.failed).toLocaleString()}</td>
+                  <td style={{ padding: '11px 14px', color: '#64748b', fontFamily: 'monospace', fontSize: '12px' }}>{parseInt(l.checked).toLocaleString('en-US')}</td>
+                  <td style={{ padding: '11px 14px', color: parseInt(l.failed) > 0 ? '#dc2626' : '#16a34a', fontWeight: 600, fontFamily: 'monospace', fontSize: '12px' }}>{parseInt(l.failed).toLocaleString('en-US')}</td>
                   <td style={{ padding: '11px 14px', color: '#64748b', fontSize: '12px', fontFamily: 'monospace' }}>{l.duration}</td>
                   <td style={{ padding: '11px 14px', color: '#64748b', fontSize: '12px' }}>{l.trigger}</td>
                   <td style={{ padding: '11px 14px', color: '#475569', fontSize: '12px' }}>{l.runBy}</td>

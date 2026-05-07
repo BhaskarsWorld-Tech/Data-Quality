@@ -95,7 +95,7 @@ export default function IssuesPage() {
                 <div style={{ fontSize:'13.5px', fontWeight:600, color:'#1a1a1a', marginBottom:'4px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{issue.title}</div>
                 <div style={{ fontSize:'12px', color:'#94a3b8' }}>
                   <code style={{ background:'#f1f5f9', padding:'1px 6px', borderRadius:'4px', fontSize:'11px' }}>{issue.dataset}</code>
-                  {' · '}{issue.rule}{' · '}<span>{issue.count > 0 ? `${issue.count.toLocaleString()} records affected` : 'resolved'}</span>
+                  {' · '}{issue.rule}{' · '}<span>{issue.count > 0 ? `${issue.count.toLocaleString('en-US')} records affected` : 'resolved'}</span>
                 </div>
               </div>
               <div style={{ textAlign:'right', flexShrink:0 }}>
