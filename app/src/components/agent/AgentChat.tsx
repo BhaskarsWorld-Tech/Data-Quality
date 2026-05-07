@@ -57,15 +57,15 @@ const SUGGESTIONS = [
   "What rules do I have?",
 ]
 
+const INITIAL_MSG: AgentMessage = {
+  role: 'assistant',
+  content: "Hi! I'm **DataGuard AI** 🛡️\n\nI can help you:\n- **Add connections** to your databases\n- **Create quality rules** (null checks, uniqueness, ranges, patterns)\n- **Run quality checks** and view reports\n- **Answer questions** about data quality\n\nWhat would you like to do?",
+  timestamp: '2026-01-01T00:00:00.000Z'   // stable — avoids server/client hydration mismatch
+}
+
 export default function AgentChat() {
   const [open, setOpen] = useState(false)
-  const [messages, setMessages] = useState<AgentMessage[]>([
-    {
-      role: 'assistant',
-      content: "Hi! I'm **DataGuard AI** 🛡️\n\nI can help you:\n- **Add connections** to your databases\n- **Create quality rules** (null checks, uniqueness, ranges, patterns)\n- **Run quality checks** and view reports\n- **Answer questions** about data quality\n\nWhat would you like to do?",
-      timestamp: new Date().toISOString()
-    }
-  ])
+  const [messages, setMessages] = useState<AgentMessage[]>([INITIAL_MSG])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
