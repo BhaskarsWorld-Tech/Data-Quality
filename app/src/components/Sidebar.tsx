@@ -62,7 +62,6 @@ const sections: NavSection[] = [
       { href: '/execution-logs', label: 'Execution Logs', icon: icons.logs },
       { href: '/alerts', label: 'Alerts', icon: icons.alerts },
       { href: '/audit-logs', label: 'Audit Logs', icon: icons.audit },
-      { href: '/ai-assistant', label: 'AI Assistant', icon: icons.ai },
     ]
   },
   {
@@ -70,7 +69,7 @@ const sections: NavSection[] = [
     items: [
       { href: '/reports', label: 'Reports', icon: icons.reports },
       { href: '/domains', label: 'Domain Management', icon: icons.domains },
-      { href: '/architecture', label: 'Architecture', icon: icons.architecture },
+      { href: '/architecture', label: 'User Guide', icon: icons.architecture },
       { href: '/settings', label: 'Settings', icon: icons.settings },
     ]
   }

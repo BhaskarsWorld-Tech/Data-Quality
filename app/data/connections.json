@@ -1,1 +1,17 @@
-[]
+[
+  {
+    "name": "SF_CODEX",
+    "type": "snowflake",
+    "account": "XSIJYKV-LNB51847.snowflakecomputing.com",
+    "warehouse": "CODEX_AI",
+    "role": "ACCOUNTADMIN",
+    "database": "CODEX",
+    "schema": "PUBLIC",
+    "username": "BHASKARREDDIVARI",
+    "password": "BhaskarReddivari30$",
+    "id": "conn_1778038927683_6wexdmvm5",
+    "status": "active",
+    "createdAt": "2026-05-06T03:42:07.683Z",
+    "lastTested": "2026-05-06T04:05:10.470Z"
+  }
+]
