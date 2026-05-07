@@ -32,13 +32,16 @@ export default function ExecutionLogsPage() {
   return (
     <div style={{ padding: '28px 36px', maxWidth: '1400px' }}>
       <div style={{ fontSize: '12.5px', color: '#94a3b8', marginBottom: '8px' }}>Workspace · <span style={{ color: '#475569' }}>Analytics platform</span></div>
-      <div style={{ marginBottom: '24px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Execution Logs</h1>
-        <p style={{ color: '#64748b', fontSize: '13px', margin: '4px 0 0' }}>Full history of every quality check run</p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
+        <div>
+          <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Execution Logs</h1>
+          <p style={{ color: '#64748b', fontSize: '13px', margin: '4px 0 0' }}>Full history of every quality check run · {logs.length} runs today</p>
+        </div>
+        <button style={{ background: '#fff', border: '1px solid #e2e8f0', padding: '8px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 500, color: '#475569', cursor: 'pointer' }}>⬇ Export CSV</button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '24px' }}>
-        {[{ label: 'Total Runs (24h)', value: logs.length, icon: '🔄' }, { label: 'Passed', value: logs.filter(l => l.status === 'passed').length, icon: '✅' }, { label: 'Failed', value: logs.filter(l => l.status === 'failed').length, icon: '❌' }, { label: 'Warnings', value: logs.filter(l => l.status === 'warning').length, icon: '⚠️' }].map(s => (
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: '12px', marginBottom: '24px' }}>
+        {[{ label: 'Total Runs (24h)', value: logs.length, icon: '🔄' }, { label: 'Passed', value: logs.filter(l => l.status === 'passed').length, icon: '✅' }, { label: 'Failed', value: logs.filter(l => l.status === 'failed').length, icon: '❌' }, { label: 'Warnings', value: logs.filter(l => l.status === 'warning').length, icon: '⚠️' }, { label: 'Avg Score', value: Math.round(logs.reduce((a, l) => a + l.score, 0) / logs.length) + '%', icon: '📊' }].map(s => (
           <div key={s.label} style={{ background: '#fff', border: '1px solid #ebe8df', borderRadius: '12px', padding: '16px 20px' }}>
             <div style={{ fontSize: '22px', marginBottom: '6px' }}>{s.icon}</div>
             <div style={{ fontSize: '26px', fontWeight: 700, color: '#1a1a1a' }}>{s.value}</div>

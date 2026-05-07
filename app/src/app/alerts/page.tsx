@@ -30,11 +30,16 @@ export default function AlertsPage() {
   const [alerts, setAlerts] = useState(recentAlerts)
   const [tab, setTab] = useState<'recent' | 'rules'>('recent')
 
+  const unacked = alerts.filter(a => !a.ack).length
+
   function toggleRule(id: string) {
     setRules(prev => prev.map(r => r.id === id ? { ...r, enabled: !r.enabled } : r))
   }
   function ack(id: string) {
     setAlerts(prev => prev.map(a => a.id === id ? { ...a, ack: true } : a))
+  }
+  function ackAll() {
+    setAlerts(prev => prev.map(a => ({ ...a, ack: true })))
   }
 
   return (
@@ -45,7 +50,10 @@ export default function AlertsPage() {
           <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Alerts</h1>
           <p style={{ color: '#64748b', fontSize: '13px', margin: '4px 0 0' }}>{alerts.filter(a => !a.ack).length} unacknowledged · {rules.filter(r => r.enabled).length} active alert rules</p>
         </div>
-        <button style={{ background: '#dbeafe', border: '1px solid #93c5fd', padding: '8px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: 600, color: '#2563eb', cursor: 'pointer' }}>+ New Alert Rule</button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          {unacked > 0 && <button onClick={ackAll} style={{ background: '#fff', border: '1px solid #e2e8f0', padding: '8px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 500, color: '#475569', cursor: 'pointer' }}>✓ Ack All ({unacked})</button>}
+          <button style={{ background: '#dbeafe', border: '1px solid #93c5fd', padding: '8px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: 600, color: '#2563eb', cursor: 'pointer' }}>+ New Alert Rule</button>
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '24px' }}>

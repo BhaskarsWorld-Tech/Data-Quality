@@ -145,22 +145,55 @@ export default function ReportsClient({ initialReports }: { initialReports: Repo
               ))}
             </div>
 
-            {selected.trend && selected.trend.length > 0 && (
-              <div style={{ marginBottom: '24px', background: '#f8fafc', borderRadius: '12px', padding: '16px' }}>
-                <div style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a', marginBottom: '12px' }}>7-Day Score Trend</div>
-                <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px', height: '50px' }}>
-                  {selected.trend.map((t, i) => {
-                    const h = Math.max(8, (t.score - 70) * 3)
-                    return (
-                      <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-                        <div title={`${t.date}: ${t.score}%`} style={{ width: '100%', height: `${h}px`, borderRadius: '4px 4px 0 0', background: scoreColor(t.score), opacity: i === selected.trend.length - 1 ? 1 : 0.5 }} />
-                        <div style={{ fontSize: '9px', color: '#94a3b8', whiteSpace: 'nowrap' }}>{t.date.split(' ')[1]}</div>
-                      </div>
-                    )
-                  })}
+            {selected.trend && selected.trend.length > 1 && (() => {
+              const W = 560, H = 80, PAD = 12
+              const scores = selected.trend.map(t => t.score)
+              const minS = Math.min(...scores) - 5
+              const maxS = Math.max(...scores) + 5
+              const range = maxS - minS || 1
+              const pts = selected.trend.map((t, i) => ({
+                x: PAD + (i / (selected.trend.length - 1)) * (W - PAD * 2),
+                y: H - PAD - ((t.score - minS) / range) * (H - PAD * 2),
+                score: t.score,
+                label: t.date.split(' ')[1] ?? t.date,
+              }))
+              const pathD = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
+              const areaD = `${pathD} L${pts[pts.length-1].x.toFixed(1)},${H} L${pts[0].x.toFixed(1)},${H} Z`
+              const last = pts[pts.length - 1]
+              return (
+                <div style={{ marginBottom: '24px', background: 'linear-gradient(135deg, #f8fafc, #f1f5f9)', borderRadius: '14px', padding: '18px 20px', border: '1px solid #e9eef5' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a' }}>7-Day Quality Trend</div>
+                    <div style={{ fontSize: '20px', fontWeight: 800, color: scoreColor(last.score), letterSpacing: '-0.5px' }}>{last.score}%</div>
+                  </div>
+                  <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ overflow: 'visible' }}>
+                    <defs>
+                      <linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={scoreColor(last.score)} stopOpacity="0.18" />
+                        <stop offset="100%" stopColor={scoreColor(last.score)} stopOpacity="0" />
+                      </linearGradient>
+                    </defs>
+                    {/* Grid lines */}
+                    {[0, 0.5, 1].map((t, i) => (
+                      <line key={i} x1={PAD} y1={PAD + t * (H - PAD * 2)} x2={W - PAD} y2={PAD + t * (H - PAD * 2)} stroke="#e2e8f0" strokeWidth="1" strokeDasharray="4 3" />
+                    ))}
+                    {/* Area fill */}
+                    <path d={areaD} fill="url(#trendGrad)" />
+                    {/* Trend line */}
+                    <path d={pathD} fill="none" stroke={scoreColor(last.score)} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+                    {/* Data points + labels */}
+                    {pts.map((p, i) => (
+                      <g key={i}>
+                        <circle cx={p.x} cy={p.y} r="3.5" fill={i === pts.length - 1 ? scoreColor(p.score) : '#fff'} stroke={scoreColor(p.score)} strokeWidth="2" />
+                        <text x={p.x} y={H} textAnchor="middle" fontSize="9.5" fill="#94a3b8" fontFamily="system-ui,sans-serif">{p.label}</text>
+                      </g>
+                    ))}
+                    {/* Tooltip for last point */}
+                    <text x={last.x} y={last.y - 9} textAnchor="middle" fontSize="10" fontWeight="700" fill={scoreColor(last.score)} fontFamily="system-ui,sans-serif">{last.score}%</text>
+                  </svg>
                 </div>
-              </div>
-            )}
+              )
+            })()}
 
             <div style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a', marginBottom: '12px' }}>Check Results</div>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>

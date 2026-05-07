@@ -18,9 +18,18 @@ const statStyle: Record<string, { bg: string; color: string }> = {
 
 export default function SchedulesPage() {
   const [scheduleList, setScheduleList] = useState(schedules)
+  const [runningId, setRunningId] = useState<string | null>(null)
 
   function toggle(id: string) {
     setScheduleList(prev => prev.map(s => s.id === id ? { ...s, status: s.status === 'active' ? 'paused' : 'active' } : s))
+  }
+
+  function runNow(id: string) {
+    setRunningId(id)
+    setTimeout(() => {
+      setRunningId(null)
+      setScheduleList(prev => prev.map(s => s.id === id ? { ...s, lastRun: new Date().toISOString().slice(0, 16).replace('T', ' ') } : s))
+    }, 2000)
   }
 
   return (
@@ -77,7 +86,7 @@ export default function SchedulesPage() {
                       <button onClick={() => toggle(s.id)} style={{ padding: '4px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', background: '#fff', color: '#475569', fontSize: '11.5px', cursor: 'pointer' }}>
                         {s.status === 'active' ? '⏸ Pause' : '▶ Resume'}
                       </button>
-                      <button style={{ padding: '4px 10px', borderRadius: '6px', border: '1px solid #dbeafe', background: '#fff', color: '#2563eb', fontSize: '11.5px', cursor: 'pointer' }}>▶ Run Now</button>
+                      <button onClick={() => runNow(s.id)} disabled={runningId === s.id} style={{ padding: '4px 10px', borderRadius: '6px', border: '1px solid #dbeafe', background: runningId === s.id ? '#eff6ff' : '#fff', color: '#2563eb', fontSize: '11.5px', cursor: runningId === s.id ? 'not-allowed' : 'pointer' }}>{runningId === s.id ? '⏳ Running…' : '▶ Run Now'}</button>
                     </div>
                   </td>
                 </tr>

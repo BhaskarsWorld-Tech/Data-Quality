@@ -41,9 +41,12 @@ export default function AuditLogsPage() {
   return (
     <div style={{ padding: '28px 36px', maxWidth: '1300px' }}>
       <div style={{ fontSize: '12.5px', color: '#94a3b8', marginBottom: '8px' }}>Workspace · <span style={{ color: '#475569' }}>Analytics platform</span></div>
-      <div style={{ marginBottom: '24px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Audit Logs</h1>
-        <p style={{ color: '#64748b', fontSize: '13px', margin: '4px 0 0' }}>Complete record of all user and system actions — {logs.length} events in the last 7 days</p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
+        <div>
+          <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Audit Logs</h1>
+          <p style={{ color: '#64748b', fontSize: '13px', margin: '4px 0 0' }}>Complete record of all user and system actions — {logs.length} events in the last 7 days</p>
+        </div>
+        <button style={{ background: '#fff', border: '1px solid #e2e8f0', padding: '8px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 500, color: '#475569', cursor: 'pointer' }}>⬇ Export Log</button>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '24px' }}>
