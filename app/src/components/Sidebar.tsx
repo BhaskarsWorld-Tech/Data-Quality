@@ -164,22 +164,10 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* User */}
-      <div style={{ padding: '12px 14px', borderTop: '1px solid #f3f1ea', background: '#fafaf5' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{
-            width: '32px', height: '32px', borderRadius: '50%',
-            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: '#fff', fontWeight: 600, fontSize: '13px'
-          }}>B</div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>System Admin</div>
-            <div style={{ fontSize: '10.5px', color: '#94a3b8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Bhaskar</div>
-          </div>
-          <button style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8', padding: '4px' }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          </button>
+      {/* Version footer */}
+      <div style={{ padding: '10px 14px', borderTop: '1px solid #f3f1ea', background: '#fafaf5' }}>
+        <div style={{ fontSize: '10.5px', color: '#94a3b8', textAlign: 'center', letterSpacing: '0.02em' }}>
+          DataGuard v2.4 · Analytics Platform
         </div>
       </div>
     </aside>
