@@ -87,12 +87,22 @@ export default function Sidebar() {
       {/* Logo */}
       <div style={{ padding: '20px 18px 16px', borderBottom: '1px solid #f3f1ea' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          {/* Orange EC / infinity logo */}
           <div style={{
-            width: '32px', height: '32px', borderRadius: '8px',
-            background: 'linear-gradient(135deg, #2563eb, #4f46e5)',
+            width: '36px', height: '36px', borderRadius: '9px',
+            background: '#E8541A',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: '#fff', fontWeight: 700, fontSize: '14px'
-          }}>D</div>
+            flexShrink: 0,
+            boxShadow: '0 2px 8px rgba(232,84,26,0.35)',
+          }}>
+            <svg width="24" height="14" viewBox="0 0 48 28" fill="none">
+              {/* Left loop of the EC/infinity shape */}
+              <path d="M14 4 C6 4 2 9 2 14 C2 19 6 24 14 24 C19 24 23 21 25 17 C23 21 27 24 34 24 C42 24 46 19 46 14 C46 9 42 4 34 4 C27 4 23 7 25 11 C23 7 19 4 14 4 Z"
+                fill="none" stroke="white" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"/>
+              {/* Middle bar (the "e" crossbar feel) */}
+              <line x1="5" y1="14" x2="22" y2="14" stroke="white" strokeWidth="3.5" strokeLinecap="round"/>
+            </svg>
+          </div>
           <div>
             <div style={{ color: '#1a1a1a', fontWeight: 700, fontSize: '14px' }}>DataGuard</div>
             <div style={{ color: '#94a3b8', fontSize: '10.5px', letterSpacing: '0.02em' }}>Quality Platform</div>
