@@ -19,6 +19,7 @@ const icons = {
   issues: <Icon d="M12 9v4m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 00-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z" />,
   anomalies: <Icon d="M3 17l6-6 4 4 8-8M14 7h7v7" />,
   lineage: <Icon d="M5 12h4l3-7 4 14 3-7h4" />,
+  browser: <Icon d="M3 3h18v4H3zM3 10h18v4H3zM3 17h18v4H3z" />,
   catalog: <Icon d="M4 19.5v-15A2.5 2.5 0 016.5 2H20v20H6.5a2.5 2.5 0 010-5H20" />,
   contracts: <Icon d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zM14 2v6h6M9 13h6M9 17h6M9 9h2" />,
   slas: <Icon d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />,
@@ -39,7 +40,8 @@ const sections: NavSection[] = [
     title: 'MONITOR',
     items: [
       { href: '/', label: 'Overview', icon: icons.overview },
-      { href: '/datasets', label: 'Datasets', icon: icons.datasets, badge: '142' },
+      { href: '/datasets', label: 'Datasets', icon: icons.datasets },
+      { href: '/data-browser', label: 'Live Data Browser', icon: icons.browser },
       { href: '/rules', label: 'Rules', icon: icons.rules, badge: '418' },
       { href: '/issues', label: 'Issues', icon: icons.issues, badge: '23' },
       { href: '/anomalies', label: 'Anomalies', icon: icons.anomalies },
