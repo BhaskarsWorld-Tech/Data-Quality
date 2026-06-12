@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Connection, ConnectionType } from '@/lib/types'
 import { formatDateTime, connectionIcons } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
@@ -125,13 +125,10 @@ const typeFields: Record<ConnectionType, FieldDef[]> = {
     { key: 'password', label: 'Password', placeholder: '••••••••', type: 'password' },
   ],
   snowflake: [
-    { key: 'account', label: 'Account Identifier', placeholder: 'abc12345.us-east-1', required: true, full: true, hint: 'Found in your Snowflake URL: <account>.snowflakecomputing.com' },
-    { key: 'warehouse', label: 'Warehouse', placeholder: 'COMPUTE_WH', required: true },
-    { key: 'role', label: 'Role', placeholder: 'SYSADMIN' },
-    { key: 'database', label: 'Database', placeholder: 'MY_DATABASE', required: true },
-    { key: 'schema', label: 'Schema', placeholder: 'PUBLIC' },
+    { key: 'account',  label: 'Account Identifier', placeholder: 'KTEMQNZ-XH43008', required: true, full: true, hint: 'From your Snowflake URL: <account>.snowflakecomputing.com — only the account identifier. Warehouse / database / schema are chosen per page after connecting.' },
     { key: 'username', label: 'Username', placeholder: 'SNOWFLAKE_USER', required: true },
     { key: 'password', label: 'Password', placeholder: '••••••••', type: 'password', required: true },
+    { key: 'role',     label: 'Default Role (optional)', placeholder: 'ACCOUNTADMIN', hint: 'Leave blank to use the account default — you can switch role / warehouse / DB / schema anywhere in the app.' },
   ],
   bigquery: [
     { key: 'project', label: 'Project ID', placeholder: 'my-gcp-project-123', required: true, full: true },
@@ -185,12 +182,18 @@ const statusBadge = {
   error: { bg: '#fee2e2', color: '#dc2626', dot: '#dc2626', label: 'Error' }
 }
 
-interface Props { initialConnections: Connection[] }
+interface Props { initialConnections?: Connection[]; embedded?: boolean }
 
 type FormState = Record<string, string> & { name: string; type: ConnectionType }
 
-export default function ConnectionsClient({ initialConnections }: Props) {
-  const [connections, setConnections] = useState(initialConnections)
+export default function ConnectionsClient({ initialConnections, embedded = false }: Props) {
+  const [connections, setConnections] = useState<Connection[]>(initialConnections ?? [])
+  // Lazy-load connections if not provided (for embedded usage in Settings)
+  useEffect(() => {
+    if (!initialConnections) {
+      fetch('/api/connections').then(r => r.json()).then(setConnections).catch(() => {})
+    }
+  }, [initialConnections])
   const [showModal, setShowModal] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -301,11 +304,13 @@ export default function ConnectionsClient({ initialConnections }: Props) {
   const selectedType = CONNECTION_TYPES.find(t => t.value === form.type)
 
   return (
-    <div style={{ padding: '28px 36px', maxWidth: '1200px' }}>
+    <div style={embedded ? { width: '100%' } : { padding: '28px 36px', maxWidth: '1200px' }}>
       <style>{`@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
-      <div style={{ fontSize: '12.5px', color: '#94a3b8', marginBottom: '8px' }}>
-        Workspace · <span style={{ color: '#475569' }}>Analytics platform</span>
-      </div>
+      {!embedded && (
+        <div style={{ fontSize: '12.5px', color: '#94a3b8', marginBottom: '8px' }}>
+          Workspace · <span style={{ color: '#475569' }}>Analytics platform</span>
+        </div>
+      )}
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
         <div>
@@ -505,6 +510,25 @@ export default function ConnectionsClient({ initialConnections }: Props) {
                   </div>
                 ))}
               </div>
+
+              {/* Snowflake — context (warehouse / DB / schema) is picked per-page after connecting */}
+              {form.type === 'snowflake' && (
+                <div style={{
+                  background: '#eff6ff', border: '1px solid #bfdbfe',
+                  borderRadius: '10px', padding: '12px 14px',
+                  display: 'flex', alignItems: 'flex-start', gap: '10px'
+                }}>
+                  <div style={{ fontSize: '18px' }}>💡</div>
+                  <div style={{ flex: 1, minWidth: 200 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: '#1e40af' }}>
+                      Warehouse, Database & Schema are picked per page
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: '#1e40af', marginTop: '2px', opacity: 0.85 }}>
+                      After saving, switch warehouse / DB / schema anywhere using the horizontal selector at the top of every analytics page.
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Buttons */}
               <div style={{ display: 'flex', gap: '10px', paddingTop: '4px' }}>

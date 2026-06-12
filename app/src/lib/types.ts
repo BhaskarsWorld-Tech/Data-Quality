@@ -60,6 +60,10 @@ export interface CheckResult {
   executedAt: string
   duration: number
   details?: string
+  /** Whether the rule applied to a single table ("specific") or expanded
+   *  across every table in the schema ("generic"). Derived from the rule's
+   *  tableName at execution time. */
+  scope?: 'generic' | 'specific'
 }
 
 export interface Report {
@@ -73,6 +77,12 @@ export interface Report {
   executedAt: string
   results: CheckResult[]
   trend: { date: string; score: number }[]
+  /** Report-type filter applied at creation time. */
+  type?:    'quality' | 'freshness' | 'anomaly' | 'sla' | 'lineage' | 'custom'
+  /** Domain scope applied at creation time (e.g. "Finance"). */
+  domain?:  string
+  /** Dataset / table scope applied at creation time. */
+  dataset?: string
 }
 
 export interface DashboardStats {

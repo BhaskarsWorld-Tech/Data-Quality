@@ -42,8 +42,8 @@ const sections: NavSection[] = [
       { href: '/', label: 'Overview', icon: icons.overview },
       { href: '/datasets', label: 'Datasets', icon: icons.datasets },
       { href: '/data-browser', label: 'Live Data Browser', icon: icons.browser },
-      { href: '/rules', label: 'Rules', icon: icons.rules, badge: '418' },
-      { href: '/issues', label: 'Issues', icon: icons.issues, badge: '23' },
+      { href: '/rules', label: 'Rules', icon: icons.rules },
+      { href: '/issues', label: 'Issues', icon: icons.issues },
       { href: '/anomalies', label: 'Anomalies', icon: icons.anomalies },
     ]
   },
@@ -59,7 +59,6 @@ const sections: NavSection[] = [
   {
     title: 'OPERATIONS',
     items: [
-      { href: '/connections', label: 'Connections', icon: icons.connections },
       { href: '/schedules', label: 'Schedules', icon: icons.schedules },
       { href: '/execution-logs', label: 'Execution Logs', icon: icons.logs },
       { href: '/alerts', label: 'Alerts', icon: icons.alerts },
@@ -137,8 +136,9 @@ export default function Sidebar() {
             {section.items.map(item => {
               const active = pathname === item.href
               return (
-                <Link key={item.href} href={item.href} style={{ textDecoration: 'none' }}>
-                  <div style={{
+                <Link key={item.href} href={item.href} style={{ textDecoration: 'none' }} aria-label={item.label}>
+                  <div className="dg-nav-item" style={{
+                    position: 'relative',
                     display: 'flex', alignItems: 'center', gap: '10px',
                     padding: '7px 10px', borderRadius: '7px', marginBottom: '1px',
                     background: active ? '#eef4ff' : 'transparent',
@@ -148,7 +148,7 @@ export default function Sidebar() {
                     borderLeft: active ? '2px solid #2563eb' : '2px solid transparent',
                     paddingLeft: active ? '8px' : '10px'
                   }}>
-                    <span style={{ display: 'flex', opacity: active ? 1 : 0.7 }}>{item.icon}</span>
+                    <span style={{ display: 'flex', opacity: active ? 1 : 0.75 }}>{item.icon}</span>
                     <span style={{ flex: 1 }}>{item.label}</span>
                     {item.badge && (
                       <span style={{
@@ -158,6 +158,8 @@ export default function Sidebar() {
                         fontSize: '10.5px', fontWeight: 600, minWidth: '20px', textAlign: 'center'
                       }}>{item.badge}</span>
                     )}
+                    {/* Instant tooltip — appears on hover with zero delay */}
+                    <span className="dg-nav-tooltip" role="tooltip">{item.label}</span>
                   </div>
                 </Link>
               )

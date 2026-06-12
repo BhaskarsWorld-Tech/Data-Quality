@@ -1,0 +1,56 @@
+{
+  "channels": {
+    "slack": {
+      "enabled": true,
+      "webhookUrl": "https://hooks.slack.com/services/T00/B00/EXAMPLE",
+      "groupName": "#data-alerts"
+    },
+    "teams": {
+      "enabled": true,
+      "webhookUrl": "https://example.webhook.office.com/EXAMPLE",
+      "channelName": "DQ Alerts"
+    },
+    "webex": {
+      "enabled": true,
+      "webhookUrl": "",
+      "spaceName": ""
+    },
+    "email": {
+      "enabled": true,
+      "recipients": [
+        "yourschinnu@gmail.com"
+      ],
+      "fromAddress": "alerts@dataguard.io"
+    },
+    "pagerduty": {
+      "enabled": true,
+      "routingKey": ""
+    }
+  },
+  "autoSend": {
+    "critical": true,
+    "warning": true,
+    "info": false
+  },
+  "lastDispatched": {
+    "ALR-0001": "2026-05-15T05:23:18.131Z",
+    "ALR-0002": "2026-05-15T05:23:18.270Z",
+    "ALR-0003": "2026-05-15T05:23:18.467Z",
+    "ALR-0004": "2026-05-15T05:23:18.673Z",
+    "ALR-0005": "2026-05-15T05:23:18.883Z",
+    "ALR-0006": "2026-05-15T05:23:19.080Z",
+    "ALR-0007": "2026-05-15T05:23:19.217Z",
+    "ALR-0008": "2026-05-15T05:23:19.374Z",
+    "ALR-0009": "2026-05-15T05:23:19.579Z",
+    "ALR-0010": "2026-05-15T05:23:19.787Z",
+    "ALR-0011": "2026-05-15T05:23:19.927Z",
+    "ALR-0012": "2026-05-15T05:23:20.063Z",
+    "ALR-0013": "2026-05-15T05:23:20.210Z",
+    "ALR-0014": "2026-05-15T05:23:20.405Z",
+    "ALR-0015": "2026-05-15T05:23:20.608Z",
+    "ALR-0016": "2026-05-15T05:23:20.796Z",
+    "ALR-0017": "2026-05-15T05:23:20.947Z",
+    "ALR-0018": "2026-05-15T05:23:21.086Z",
+    "ALR-0019": "2026-05-15T05:23:21.238Z"
+  }
+}

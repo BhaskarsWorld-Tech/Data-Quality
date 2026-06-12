@@ -1,17 +1,17 @@
 [
   {
-    "name": "SF_CODEX",
+    "name": "DM_Solutions",
     "type": "snowflake",
-    "account": "XSIJYKV-LNB51847.snowflakecomputing.com",
-    "warehouse": "CODEX_AI",
+    "account": "FPUYJEJ-ISB99901.snowflakecomputing.com",
     "role": "ACCOUNTADMIN",
-    "database": "CODEX",
-    "schema": "PUBLIC",
-    "username": "BHASKARREDDIVARI",
-    "password": "BhaskarReddivari30$",
-    "id": "conn_1778038927683_6wexdmvm5",
+    "warehouse": "COMPUTE_WH",
+    "database": "SUPPLYCHAIN_DB",
+    "schema": "SUPPLYCHAIN",
+    "username": "DMSolutions",
+    "password": "DM_Solutions01$",
+    "id": "conn_1778289152245_ej1h9yn2u",
     "status": "active",
-    "createdAt": "2026-05-06T03:42:07.683Z",
-    "lastTested": "2026-05-06T04:05:10.470Z"
+    "createdAt": "2026-05-09T01:12:32.245Z",
+    "lastTested": "2026-05-15T04:55:32.002Z"
   }
 ]

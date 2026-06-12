@@ -1,0 +1,46 @@
+{
+  "authentication": {
+    "ssoEnabled": false,
+    "ssoProvider": "none",
+    "mfaRequired": true,
+    "mfaMethod": "totp",
+    "passwordMinLength": 12,
+    "passwordRequireSpecial": true,
+    "passwordRotateDays": 90
+  },
+  "session": {
+    "timeoutMinutes": 60,
+    "maxConcurrent": 3,
+    "rememberMeAllowed": false
+  },
+  "access": {
+    "ipAllowlistEnabled": false,
+    "ipAllowlist": [],
+    "rbacEnabled": true,
+    "defaultRole": "viewer"
+  },
+  "dataProtection": {
+    "encryptAtRest": true,
+    "encryptInTransit": true,
+    "piiDetection": true,
+    "piiMaskingInLogs": true,
+    "queryAuditEnabled": true
+  },
+  "api": {
+    "keyRotationDays": 90,
+    "webhookSigning": true,
+    "rateLimitPerMinute": 600,
+    "requireHttps": true
+  },
+  "audit": {
+    "retentionDays": 365,
+    "exportEnabled": true,
+    "anomalyDetection": true
+  },
+  "compliance": {
+    "soc2": true,
+    "gdpr": true,
+    "hipaa": false,
+    "iso27001": false
+  }
+}

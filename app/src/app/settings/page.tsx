@@ -1,8 +1,12 @@
 'use client'
 import { useState } from 'react'
+import ConnectionsClient from '@/components/connections/ConnectionsClient'
+import SecurityPanel from '@/components/settings/SecurityPanel'
+import WorkspacePanel from '@/components/settings/WorkspacePanel'
+import AnthropicKeyPanel from '@/components/settings/AnthropicKeyPanel'
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState<'profile' | 'notifications' | 'api' | 'integrations' | 'workspace'>('profile')
+  const [tab, setTab] = useState<'profile' | 'connections' | 'notifications' | 'api' | 'integrations' | 'security' | 'workspace'>('profile')
   const [saved, setSaved] = useState(false)
   const [profile, setProfile] = useState({ name: 'Bhaskar Reddivari', email: 'yourschinnu@gmail.com', role: 'Admin', timezone: 'Asia/Kolkata', language: 'en' })
   const [notifs, setNotifs] = useState({ emailCritical: true, emailHigh: true, emailWeekly: true, slackCritical: true, slackHigh: false, slackDaily: false, pagerduty: false })
@@ -54,11 +58,13 @@ export default function SettingsPage() {
   }
 
   const tabs = [
-    { id: 'profile', label: 'Profile', icon: '👤' },
+    { id: 'profile',       label: 'Profile',       icon: '👤' },
+    { id: 'connections',   label: 'Connections',   icon: '🔌' },
+    { id: 'security',      label: 'Security',      icon: '🛡️' },
     { id: 'notifications', label: 'Notifications', icon: '🔔' },
-    { id: 'api', label: 'API Keys', icon: '🔑' },
-    { id: 'integrations', label: 'Integrations', icon: '🔌' },
-    { id: 'workspace', label: 'Workspace', icon: '🏢' },
+    { id: 'api',           label: 'API Keys',      icon: '🔑' },
+    { id: 'integrations',  label: 'Integrations',  icon: '🧩' },
+    { id: 'workspace',     label: 'Workspace',     icon: '🏢' },
   ] as const
 
   return (
@@ -104,6 +110,10 @@ export default function SettingsPage() {
             </div>
           )}
 
+          {tab === 'connections' && <ConnectionsClient embedded />}
+
+          {tab === 'security' && <SecurityPanel />}
+
           {tab === 'notifications' && (
             <div style={{ background: '#fff', border: '1px solid #ebe8df', borderRadius: '12px', padding: '24px' }}>
               <div style={{ fontWeight: 700, fontSize: '15px', color: '#1a1a1a', marginBottom: '20px' }}>Notification Preferences</div>
@@ -131,6 +141,8 @@ export default function SettingsPage() {
           )}
 
           {tab === 'api' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <AnthropicKeyPanel />
             <div style={{ background: '#fff', border: '1px solid #ebe8df', borderRadius: '12px', padding: '24px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                 <div style={{ fontWeight: 700, fontSize: '15px', color: '#1a1a1a' }}>API Keys</div>
@@ -228,6 +240,7 @@ export default function SettingsPage() {
                 </div>
               )}
             </div>
+            </div>
           )}
 
           {tab === 'integrations' && (
@@ -256,24 +269,7 @@ export default function SettingsPage() {
             </div>
           )}
 
-          {tab === 'workspace' && (
-            <div style={{ background: '#fff', border: '1px solid #ebe8df', borderRadius: '12px', padding: '24px' }}>
-              <div style={{ fontWeight: 700, fontSize: '15px', color: '#1a1a1a', marginBottom: '20px' }}>Workspace Settings</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {[['Workspace Name', 'Analytics platform'], ['Organization', 'BhaskarsWorld Tech'], ['Default Connection', 'SF_Codex'], ['Data Retention', '90 days'], ['Timezone', 'Asia/Kolkata (IST)']].map(([label, value]) => (
-                  <div key={label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid #f3f1ea' }}>
-                    <span style={{ fontSize: '13px', color: '#475569', fontWeight: 500 }}>{label}</span>
-                    <span style={{ fontSize: '13px', color: '#1a1a1a', fontWeight: 600 }}>{value}</span>
-                  </div>
-                ))}
-              </div>
-              <div style={{ marginTop: '24px', background: '#fff5f5', border: '1px solid #fecaca', borderRadius: '10px', padding: '16px' }}>
-                <div style={{ fontWeight: 600, fontSize: '13px', color: '#dc2626', marginBottom: '6px' }}>Danger Zone</div>
-                <div style={{ fontSize: '12.5px', color: '#64748b', marginBottom: '12px' }}>These actions cannot be undone. Please be certain.</div>
-                <button style={{ padding: '7px 16px', borderRadius: '7px', border: '1px solid #fca5a5', background: '#fff', color: '#dc2626', fontSize: '12.5px', fontWeight: 500, cursor: 'pointer' }}>Reset Workspace Data</button>
-              </div>
-            </div>
-          )}
+          {tab === 'workspace' && <WorkspacePanel />}
         </div>
       </div>
     </div>

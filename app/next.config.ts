@@ -1,8 +1,8 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from "next"
 
 const nextConfig: NextConfig = {
-  // snowflake-sdk uses native Node.js modules — keep it server-side only
-  serverExternalPackages: ['snowflake-sdk'],
-};
+  // (Cloudflare deployment doesn't need any special bundler config now that
+  // snowflake-sdk has been replaced by a fetch-based REST client.)
+}
 
-export default nextConfig;
+export default nextConfig

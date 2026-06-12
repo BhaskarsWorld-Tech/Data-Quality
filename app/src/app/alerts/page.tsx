@@ -1,602 +1,315 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
+import { ConnectionToolbar, ConnectionBanner, useOverviewData } from '@/components/shared/ConnectionToolbar'
 
-type Severity = 'critical' | 'high' | 'medium' | 'info'
-type AlertFilter = 'all' | 'unacked' | 'critical' | 'high'
-type RuleFilter = 'all' | 'active' | 'critical' | 'triggered'
+type Channel = 'email' | 'slack' | 'teams' | 'webex' | 'pagerduty'
+type Severity = 'critical' | 'warning' | 'info'
 
-interface RecentAlert {
-  id: string
-  rule: string
-  dataset: string
-  severity: Severity
-  message: string
-  channel: string
-  ts: string
-  ack: boolean
-  rootCause: string
-  impact: string
-  recommendation: string
-  affectedRecords: number
-  pipeline: string
+interface Issue { id: string; table: string; severity: Severity; category: string; title: string; detail: string; recommendation: string }
+interface Alert {
+  id: string; rule: string; table: string; severity: Severity
+  triggered: string
+  domain: string; owner: string
+  context: { detail: string; recommendation: string }
 }
 
-interface AlertRule {
-  id: string
-  name: string
-  condition: string
-  datasets: string
-  channel: string
-  severity: Severity
-  enabled: boolean
-  triggered: number
-  lastFired: string
-  description: string
-  whenItFires: string
-  businessContext: string
-  remediation: string
-  cooldown: string
-  owner: string
+/** Classify a table into a business domain by name pattern. */
+function tableDomain(name: string): { domain: string; owner: string; color: string } {
+  const u = name.toUpperCase()
+  if (u.includes('CUSTOMER') || u.includes('SALE'))                          return { domain: 'Sales',        owner: 'Sales Operations', color: '#16a34a' }
+  if (u.includes('SUPPLIER') || u.includes('PURCHASE') || u.includes('SHIPMENT') || u.includes('CARRIER') || u.includes('RETURN'))
+                                                                              return { domain: 'Supply Chain', owner: 'Supply Chain Team', color: '#1d4ed8' }
+  if (u.includes('PRODUCT')  || u.includes('CATEGORY'))                      return { domain: 'Catalog',      owner: 'Product Catalog',   color: '#7c3aed' }
+  if (u.includes('INVENTORY')|| u.includes('WAREHOUSE'))                     return { domain: 'Operations',   owner: 'Operations Team',   color: '#ea580c' }
+  return { domain: 'Data Platform', owner: 'Data Platform', color: '#475569' }
 }
 
-const recentAlerts: RecentAlert[] = [
-  {
-    id: 'a1', rule: 'Critical Quality Drop', dataset: 'fact_payments',
-    severity: 'critical', channel: 'Slack + Email', ts: '2026-05-05 14:22', ack: false,
-    message: 'Quality score dropped to 61% — 5 rules failing',
-    rootCause: 'An upstream ETL job in the Stripe payment pipeline failed mid-batch on 2026-05-05 at 13:47. Partial data was written with NULL values in "amount_usd", "currency_code", and "transaction_status" columns. This caused 5 validation rules (null checks, range validation, format check) to fail simultaneously, dragging the dataset quality score from 94% to 61%.',
-    impact: 'Revenue reporting dashboards used by Finance and C-Suite are showing understated transaction totals. Approximately $2.1M in payment records cannot be reconciled. The AR team\'s daily close process is blocked. Downstream models in dbt (rpt_revenue_daily, fct_mrr) are producing incorrect output used in investor reporting.',
-    recommendation: 'Re-trigger the Stripe ETL job for the 13:00–14:30 UTC window. Validate row counts match source (expected: 18,420 rows). Run the quality check suite on fact_payments after the re-run. Temporarily pause downstream dbt models until the data is clean. Alert Finance not to use the revenue dashboard until 15:30 UTC.',
-    affectedRecords: 4821, pipeline: 'stripe_etl_v3'
-  },
-  {
-    id: 'a2', rule: 'Schema Change Detected', dataset: 'fact_payments',
-    severity: 'critical', channel: 'PagerDuty', ts: '2026-05-04 18:00', ack: false,
-    message: 'Column "amount_usd" removed — 2 downstream models affected',
-    rootCause: 'A Fivetran schema migration for the Stripe connector auto-detected a schema change in the source API. The "amount_usd" column (previously a computed field from amount × fx_rate) was removed from the connector output after Stripe deprecated this field from their v3 API. The change propagated automatically without a review gate, removing the column from the warehouse table.',
-    impact: '2 downstream dbt models (rpt_revenue_daily, fct_mrr) reference "amount_usd" directly and are now failing with "column not found" errors. BI dashboards showing revenue by currency are broken. The nightly data refresh for the Finance team will fail if not resolved before the 02:00 UTC run.',
-    recommendation: 'Add "amount_usd" back as a computed column: `amount * coalesce(fx_rate, 1.0)`. Update the Fivetran connector schema to pin the field mapping. Add a schema contract test that alerts before removing any column referenced by >1 downstream model. Set Fivetran auto-migration to "review required" mode.',
-    affectedRecords: 0, pipeline: 'fivetran_stripe_v3'
-  },
-  {
-    id: 'a3', rule: 'High Null Rate', dataset: 'dim_customers',
-    severity: 'high', channel: 'Email', ts: '2026-05-05 11:05', ack: true,
-    message: 'Email null rate jumped from 2% to 20%',
-    rootCause: 'The CRM sync job (HubSpot → Snowflake) ran with a misconfigured field mapping after a HubSpot API v2→v3 migration. The "email" field path changed from "properties.email.value" to "properties.email" in v3, causing the mapper to write NULL for all contacts updated after May 4th 00:00 UTC.',
-    impact: 'Email campaign targeting will be broken for 18,240 customers whose records were updated in the last 24 hours. Marketing automation workflows (Marketo sync, transactional emails) relying on dim_customers.email will skip these contacts. Estimated reach reduction for the next campaign: ~12%.',
-    recommendation: 'Update the HubSpot connector field mapping from "properties.email.value" to "properties.email". Re-sync affected contacts (updated_at >= 2026-05-04 00:00:00). Backfill NULL email values from the HubSpot API for the affected window. Add a null rate alerting threshold of 5% for PII fields.',
-    affectedRecords: 18240, pipeline: 'hubspot_crm_sync'
-  },
-  {
-    id: 'a4', rule: 'Freshness SLA Breach', dataset: 'dim_products',
-    severity: 'high', channel: 'Slack', ts: '2026-05-03 06:00', ack: true,
-    message: 'Table not refreshed in 36 hours — expected every 6h',
-    rootCause: 'The Airflow DAG responsible for syncing the product catalog (shopify_products_sync) has been paused since 2026-05-01 after a failed deployment. A hotfix to the product variant logic caused an import error in the DAG definition. The scheduler silently skipped 6 consecutive runs without triggering the failure alert (the alert was disabled during the maintenance window and not re-enabled).',
-    impact: 'The product catalog used by the e-commerce recommendation engine is 36 hours stale. 2,340 new products added in Shopify are not visible to the recommendation model. Pricing updates for 890 products have not propagated, causing potential incorrect prices to be shown to customers.',
-    recommendation: 'Fix the import error in shopify_products_sync DAG (line 47: incorrect relative import path). Re-enable and backfill the DAG for the missed 6 runs. Re-enable the Freshness SLA alert for dim_products. Set a process to automatically re-enable paused maintenance alerts after the maintenance window ends.',
-    affectedRecords: 3230, pipeline: 'shopify_products_sync'
-  },
-  {
-    id: 'a5', rule: 'Volume Anomaly', dataset: 'fact_orders',
-    severity: 'medium', channel: 'Slack', ts: '2026-05-05 14:22', ack: false,
-    message: 'Row count increased 340% vs 7-day baseline',
-    rootCause: 'A data backfill job was triggered manually by a Data Engineer to recover 3 months of missing order history from a legacy system migration. The backfill inserted 2.1M historical records into fact_orders in a single batch, which the volume anomaly detector flagged as a 340% spike versus the 7-day rolling average of ~620K daily rows.',
-    impact: 'This is a controlled, expected backfill — not a data quality issue. However, downstream aggregation models (fct_order_metrics, rpt_sales_by_region) will show inflated metrics for the backfill period if not handled carefully. Historical trend charts in BI dashboards will show a misleading spike on May 5th.',
-    recommendation: 'Acknowledge this alert — the volume spike is intentional. Coordinate with the BI team to add a "backfill period" annotation to trend dashboards. Run incremental dbt models with the backfill date range scoped correctly to avoid double-counting. Consider adding a "planned backfill" flag to suppress volume anomaly alerts for known operations.',
-    affectedRecords: 2100000, pipeline: 'legacy_migration_backfill'
-  },
-]
+interface AlertConfigUI {
+  channels: {
+    slack:     { enabled: boolean; webhookUrl: string; groupName: string }
+    teams:     { enabled: boolean; webhookUrl: string; channelName: string }
+    webex:     { enabled: boolean; webhookUrl: string; spaceName: string }
+    email:     { enabled: boolean; recipients: string[]; fromAddress: string }
+    pagerduty: { enabled: boolean; routingKey: string }
+  }
+  autoSend: Record<Severity, boolean>
+  lastDispatched: Record<string, string>
+}
 
-const alertRules: AlertRule[] = [
-  {
-    id: 'ar1', name: 'Critical Quality Drop', condition: 'Score < 70%',
-    datasets: 'All', channel: 'Slack + Email', severity: 'critical',
-    enabled: true, triggered: 3, lastFired: '2026-05-05 14:22',
-    description: 'Fires when any dataset\'s overall quality score drops below 70%, indicating multiple rules are failing simultaneously.',
-    whenItFires: 'Triggered when: (passing rules / total rules) < 0.70 for any dataset. Evaluated every 15 minutes.',
-    businessContext: 'A quality score below 70% typically means 3+ rules are failing, indicating a systemic data pipeline issue rather than an isolated anomaly. This level of degradation directly affects business reporting reliability.',
-    remediation: 'Immediately check the failing rules for the flagged dataset. Identify the root pipeline causing failures. Pause downstream consumption until quality is restored.',
-    cooldown: '30 minutes', owner: 'Data Engineering'
-  },
-  {
-    id: 'ar2', name: 'Schema Change Detected', condition: 'Column added/removed',
-    datasets: 'fact_*, dim_*', channel: 'PagerDuty', severity: 'critical',
-    enabled: true, triggered: 1, lastFired: '2026-05-04 18:00',
-    description: 'Detects when columns are added or removed from core fact and dimension tables, which can silently break downstream models.',
-    whenItFires: 'Compares schema snapshot at each ingestion run. Fires if column count changes or any column name in the previous snapshot is missing from the current schema.',
-    businessContext: 'Schema changes on fact/dim tables break dbt models, BI dashboards, and ML feature pipelines without warning. A missing column that was referenced downstream can cause silent NULL propagation or hard failures in production jobs.',
-    remediation: 'Identify who made the schema change and why. Check if downstream models reference the changed column. Add column back as computed if removed from source. Update contracts and downstream references before re-enabling.',
-    cooldown: '0 minutes (immediate)', owner: 'Data Engineering + Data Governance'
-  },
-  {
-    id: 'ar3', name: 'Freshness SLA Breach', condition: 'Delay > 6h',
-    datasets: 'All', channel: 'Slack', severity: 'high',
-    enabled: true, triggered: 2, lastFired: '2026-05-03 06:00',
-    description: 'Alerts when any monitored dataset has not been updated within its expected refresh window (6 hours for most tables).',
-    whenItFires: 'Checks max(updated_at) against current time. Fires when the lag exceeds 6 hours. Custom thresholds can be set per dataset (e.g., 24h for weekly tables).',
-    businessContext: 'Stale data in dashboards misleads decision-makers who assume they\'re viewing current data. Freshness breaches often indicate silent pipeline failures that won\'t surface until someone notices wrong numbers.',
-    remediation: 'Check if the upstream DAG/job is running. Look for scheduler failures or paused pipelines. Re-trigger the ingestion job. If the source system is down, communicate SLA breach to data consumers.',
-    cooldown: '60 minutes', owner: 'Data Operations'
-  },
-  {
-    id: 'ar4', name: 'High Null Rate', condition: 'Null rate > 10%',
-    datasets: 'dim_customers, fact_orders', channel: 'Email', severity: 'high',
-    enabled: true, triggered: 1, lastFired: '2026-05-05 11:05',
-    description: 'Monitors null rates in key columns of customer and order tables. A spike in nulls typically indicates a connector misconfiguration or source API change.',
-    whenItFires: 'Calculates null_count / total_rows for all non-nullable columns. Fires when any column\'s null rate exceeds 10% in the latest batch.',
-    businessContext: 'High null rates in customer and order data directly break CRM workflows, marketing automation, and revenue calculations. Even a 10% null rate in email fields means tens of thousands of customers are unreachable.',
-    remediation: 'Identify which column has elevated nulls. Check recent connector/ETL changes. Re-map the field if source schema changed. Backfill nulls from the source API. Validate the fix by running the null rate check manually.',
-    cooldown: '120 minutes', owner: 'Data Engineering'
-  },
-  {
-    id: 'ar5', name: 'Volume Anomaly', condition: 'Row count ±50% baseline',
-    datasets: 'All', channel: 'Slack', severity: 'medium',
-    enabled: true, triggered: 1, lastFired: '2026-05-05 14:22',
-    description: 'Detects unusual spikes or drops in row counts compared to the 7-day rolling average. Both over- and under-delivery of data are flagged.',
-    whenItFires: 'Computes daily row count against the 7-day P50 baseline. Fires when the deviation exceeds ±50%. For tables with high natural variance, a ±100% threshold is configurable.',
-    businessContext: 'A volume spike can indicate double-loading or a runaway backfill. A volume drop can mean missing data from a failed partition or source system outage. Both are data quality risks that affect aggregate metrics.',
-    remediation: 'Determine if the volume change is expected (planned backfill, seasonality spike) or unexpected (pipeline error). For unexpected spikes: check for duplicate loads. For unexpected drops: check source system health and partition completeness.',
-    cooldown: '60 minutes', owner: 'Data Engineering'
-  },
-  {
-    id: 'ar6', name: 'Weekly Summary Report', condition: 'Every Sunday 9 AM',
-    datasets: 'All', channel: 'Email', severity: 'info',
-    enabled: false, triggered: 0, lastFired: '2026-04-28 09:00',
-    description: 'Scheduled weekly digest summarizing data quality scores, SLA adherence, open issues, and anomalies across all monitored datasets.',
-    whenItFires: 'Cron schedule: 0 9 * * 0 (every Sunday at 9:00 AM UTC). Not condition-triggered — always fires on schedule unless disabled.',
-    businessContext: 'Provides stakeholders a regular cadence of data health visibility without requiring them to log into the platform. Useful for data owners, department heads, and governance teams.',
-    remediation: 'N/A — informational report. If the report is not being received, check email delivery settings and confirm the recipient list is up to date.',
-    cooldown: 'N/A (scheduled)', owner: 'Data Governance'
-  },
-]
-
-const SEV: Record<Severity, { bg: string; color: string; border: string }> = {
-  critical: { bg: '#fee2e2', color: '#dc2626', border: '#fca5a5' },
-  high:     { bg: '#fff7ed', color: '#ea580c', border: '#fdba74' },
-  medium:   { bg: '#fefce8', color: '#ca8a04', border: '#fde68a' },
-  info:     { bg: '#f0f9ff', color: '#0284c7', border: '#bae6fd' },
+const CHANNEL_META: Record<Channel, { label: string; icon: string; color: string; bg: string; border: string }> = {
+  email:     { label: 'Email',     icon: '📧', color: '#475569', bg: '#f1f5f9', border: '#cbd5e1' },
+  slack:     { label: 'Slack',     icon: '💬', color: '#7c3aed', bg: '#f5f3ff', border: '#c4b5fd' },
+  teams:     { label: 'Teams',     icon: '👥', color: '#1d4ed8', bg: '#eff6ff', border: '#93c5fd' },
+  webex:     { label: 'Webex',     icon: '🟢', color: '#16a34a', bg: '#f0fdf4', border: '#86efac' },
+  pagerduty: { label: 'PagerDuty', icon: '🚨', color: '#dc2626', bg: '#fee2e2', border: '#fca5a5' },
 }
 
 export default function AlertsPage() {
-  const [rules, setRules] = useState(alertRules)
-  const [alerts, setAlerts] = useState(recentAlerts)
-  const [tab, setTab] = useState<'recent' | 'rules'>('recent')
-  const [alertFilter, setAlertFilter] = useState<AlertFilter>('all')
-  const [ruleFilter, setRuleFilter] = useState<RuleFilter>('all')
-  const [expandedAlert, setExpandedAlert] = useState<string | null>(null)
-  const [expandedRule, setExpandedRule] = useState<string | null>(null)
+  const { connections, selectedId, setSelectedId, data, conn, loading, refreshing, error, refresh } =
+    useOverviewData<Alert[]>(json => {
+      const issues = (json.issues as unknown as Issue[]) ?? []
+      return issues.map((iss, i) => {
+        const d = tableDomain(iss.table)
+        return {
+          id: `ALR-${String(i + 1).padStart(4, '0')}`,
+          rule: iss.title, table: iss.table, severity: iss.severity,
+          triggered: new Date(Date.now() - i * 1800000).toISOString(),
+          domain: d.domain, owner: d.owner,
+          context: { detail: iss.detail, recommendation: iss.recommendation },
+        }
+      })
+    })
 
-  const unacked = alerts.filter(a => !a.ack).length
-  const activeRules = rules.filter(r => r.enabled).length
-  const criticalAlerts = alerts.filter(a => a.severity === 'critical').length
-  const triggeredRules = rules.filter(r => r.triggered > 0).length
+  const [filter, setFilter]         = useState<'all' | Severity>('all')
+  const [acked, setAcked]           = useState<Set<string>>(new Set())
+  const [expanded, setExpanded]     = useState<string | null>(null)
+  const [sendingFor, setSendingFor] = useState<Alert | null>(null)
+  const [showSettings, setShowSettings] = useState(false)
+  const [autoRunning, setAutoRunning] = useState(false)
+  const [autoLog, setAutoLog]       = useState<string>('')
 
-  function toggleRule(id: string) {
-    setRules(prev => prev.map(r => r.id === id ? { ...r, enabled: !r.enabled } : r))
+  /* ─── Alert config (channels + auto-send) ───────────────────────────── */
+  const [cfg, setCfg] = useState<AlertConfigUI | null>(null)
+  const loadCfg = useCallback(async () => {
+    const r = await fetch('/api/alerts/config', { cache: 'no-store' })
+    if (r.ok) setCfg(await r.json())
+  }, [])
+  useEffect(() => { loadCfg() }, [loadCfg])
+
+  /* ─── Save channel config ───────────────────────────────────────────── */
+  const [saving, setSaving] = useState(false)
+  const [saveMsg, setSaveMsg] = useState('')
+  async function saveConfig() {
+    if (!cfg) return
+    setSaving(true); setSaveMsg('')
+    try {
+      const r = await fetch('/api/alerts/config', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cfg),
+      })
+      const j = await r.json()
+      if (!r.ok || !j.ok) throw new Error(j.error ?? 'save failed')
+      setSaveMsg('✓ Configuration saved')
+      await loadCfg()
+    } catch (e) { setSaveMsg('✗ ' + (e as Error).message) }
+    finally { setSaving(false); setTimeout(() => setSaveMsg(''), 3000) }
   }
-  function ack(id: string, e: React.MouseEvent) {
-    e.stopPropagation()
-    setAlerts(prev => prev.map(a => a.id === id ? { ...a, ack: true } : a))
-  }
-  function ackAll() {
-    setAlerts(prev => prev.map(a => ({ ...a, ack: true })))
+
+  /* ─── Auto-dispatch any new alerts that match autoSend rules ────────── */
+  const alerts = data ?? []
+  async function runAutoDispatch() {
+    if (!cfg) return
+    setAutoRunning(true); setAutoLog('')
+    const lines: string[] = []
+    let dispatched = 0
+    for (const a of alerts) {
+      if (!cfg.autoSend[a.severity]) continue
+      if (cfg.lastDispatched[a.id])  { lines.push(`SKIP ${a.id}: already sent`); continue }
+      const res = await fetch('/api/alerts/send', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          alertId: a.id, auto: true, severity: a.severity,
+          subject: `[${a.domain}] ${a.rule}`,
+          body:    `Domain: ${a.domain}\nOwner: ${a.owner}\nTable: ${conn?.schema}.${a.table}\n\n${a.context.detail}\n\nRecommended fix: ${a.context.recommendation}`,
+          domain:  a.domain,
+          owner:   a.owner,
+          table:   `${conn?.schema}.${a.table}`,
+        }),
+      })
+      const j = await res.json()
+      if (j.skipped) lines.push(`SKIP ${a.id}: ${j.skipped}`)
+      else if (j.dispatched) {
+        dispatched++
+        const summary = j.dispatched.map((d: { channel: string; status: string }) => `${d.channel}:${d.status}`).join(', ')
+        lines.push(`SENT ${a.id} (${a.severity}) → ${summary}`)
+      }
+    }
+    setAutoLog(`Auto-dispatch run complete · ${dispatched} alerts sent\n${lines.join('\n')}`)
+    setAutoRunning(false)
+    await loadCfg() // refresh lastDispatched markers
   }
 
-  // Filter helpers
-  const filteredAlerts = alerts.filter(a => {
-    if (alertFilter === 'unacked') return !a.ack
-    if (alertFilter === 'critical') return a.severity === 'critical'
-    if (alertFilter === 'high') return a.severity === 'high'
-    return true
-  })
+  /* ─── Manual send ───────────────────────────────────────────────────── */
+  const [selectedCh, setSelectedCh] = useState<Set<Channel>>(new Set(['email']))
+  const [emailTo, setEmailTo]       = useState('yourschinnu@gmail.com')
+  const [sendStatus, setSendStatus] = useState<string>('')
+  const [sending, setSending]       = useState(false)
 
-  const filteredRules = rules.filter(r => {
-    if (ruleFilter === 'active') return r.enabled
-    if (ruleFilter === 'critical') return r.severity === 'critical'
-    if (ruleFilter === 'triggered') return r.triggered > 0
-    return true
-  })
-
-  // Card click handlers
-  function handleAlertCard(filter: AlertFilter) {
-    setAlertFilter(prev => prev === filter ? 'all' : filter)
-    setTab('recent')
-  }
-  function handleRuleCard(filter: RuleFilter) {
-    setRuleFilter(prev => prev === filter ? 'all' : filter)
-    setTab('rules')
+  function openSendDialog(a: Alert) {
+    setSendingFor(a)
+    // Default to enabled channels
+    const defaults: Channel[] = []
+    if (cfg?.channels.email.enabled) defaults.push('email')
+    if (cfg?.channels.slack.enabled) defaults.push('slack')
+    if (cfg?.channels.teams.enabled) defaults.push('teams')
+    if (cfg?.channels.webex.enabled) defaults.push('webex')
+    if (cfg?.channels.pagerduty.enabled && a.severity === 'critical') defaults.push('pagerduty')
+    setSelectedCh(new Set(defaults.length > 0 ? defaults : ['email']))
+    setSendStatus('')
   }
 
-  const statCards = [
-    {
-      label: 'Unacknowledged', value: unacked, icon: '🔔',
-      color: '#dc2626', activeFilter: 'unacked' as AlertFilter,
-      isRuleTab: false,
-      active: tab === 'recent' && alertFilter === 'unacked',
-    },
-    {
-      label: 'Total (24h)', value: alerts.length, icon: '📊',
-      color: '#2563eb', activeFilter: 'all' as AlertFilter,
-      isRuleTab: false,
-      active: tab === 'recent' && alertFilter === 'all',
-    },
-    {
-      label: 'Alert Rules', value: rules.length, icon: '⚙️',
-      color: '#475569', activeFilter: 'all' as RuleFilter,
-      isRuleTab: true,
-      active: tab === 'rules' && ruleFilter === 'all',
-    },
-    {
-      label: 'Active Rules', value: activeRules, icon: '▶️',
-      color: '#16a34a', activeFilter: 'active' as RuleFilter,
-      isRuleTab: true,
-      active: tab === 'rules' && ruleFilter === 'active',
-    },
-  ]
+  async function dispatchAlert() {
+    if (!sendingFor) return
+    setSending(true); setSendStatus('')
+    try {
+      const res = await fetch('/api/alerts/send', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          alertId:  sendingFor.id,
+          channels: Array.from(selectedCh),
+          to:       emailTo,
+          subject:  `[${sendingFor.severity.toUpperCase()}] [${sendingFor.domain}] ${sendingFor.rule}`,
+          body:     `Domain: ${sendingFor.domain}\nOwner: ${sendingFor.owner}\nTable: ${conn?.schema}.${sendingFor.table}\n\n${sendingFor.context.detail}\n\nRecommended: ${sendingFor.context.recommendation}`,
+          severity: sendingFor.severity,
+          domain:   sendingFor.domain,
+          owner:    sendingFor.owner,
+          table:    `${conn?.schema}.${sendingFor.table}`,
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok || !json.ok) throw new Error(json.error ?? 'send failed')
+      const lines = (json.dispatched as Array<{ channel: string; status: string; receipt: string }>)
+        .map(d => `${d.channel}: ${d.status} — ${d.receipt}`).join('\n')
+      setSendStatus(`✓ Dispatched:\n${lines}`)
+    } catch (e) {
+      setSendStatus(`✗ Error: ${(e as Error).message}`)
+    } finally { setSending(false) }
+  }
+
+  const filtered = alerts.filter(a => filter === 'all' || a.severity === filter)
+  const counts = {
+    total: alerts.length,
+    critical: alerts.filter(a => a.severity === 'critical').length,
+    warning:  alerts.filter(a => a.severity === 'warning').length,
+    autoSent: cfg ? Object.keys(cfg.lastDispatched).length : 0,
+  }
+  function fmtDate(d: string) { try { return new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) } catch { return d } }
+  const enabledChannels = (cfg ? (Object.entries(cfg.channels) as [Channel, { enabled: boolean }][]).filter(([, v]) => v.enabled).map(([k]) => k) : [])
 
   return (
-    <div style={{ padding: '28px 36px', maxWidth: '1300px' }}>
-      <div style={{ fontSize: '12.5px', color: '#94a3b8', marginBottom: '8px' }}>
-        Workspace · <span style={{ color: '#475569' }}>Analytics platform</span>
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
+    <div style={{ padding: '28px 36px', maxWidth: '1200px' }}>
+      <div style={{ fontSize: '12.5px', color: '#94a3b8', marginBottom: '8px' }}>Workspace · <span style={{ color: '#475569' }}>Analytics platform</span></div>
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', gap: '12px' }}>
         <div>
           <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Alerts</h1>
           <p style={{ color: '#64748b', fontSize: '13px', margin: '4px 0 0' }}>
-            {unacked} unacknowledged · {activeRules} active alert rules
+            {counts.total} live alerts · {enabledChannels.length === 0 ? 'no channels configured' : `auto-routing to ${enabledChannels.join(', ')}`}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          {unacked > 0 && (
-            <button onClick={ackAll} style={{
-              background: '#fff', border: '1px solid #e2e8f0', padding: '8px 14px',
-              borderRadius: '8px', fontSize: '13px', fontWeight: 500, color: '#475569', cursor: 'pointer'
-            }}>✓ Ack All ({unacked})</button>
-          )}
-          <button style={{
-            background: '#dbeafe', border: '1px solid #93c5fd', padding: '8px 16px',
-            borderRadius: '8px', fontSize: '13px', fontWeight: 600, color: '#2563eb', cursor: 'pointer'
-          }}>+ New Alert Rule</button>
-        </div>
-      </div>
-
-      {/* Stat Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '24px' }}>
-        {statCards.map((s, i) => (
-          <div
-            key={i}
-            onClick={() => s.isRuleTab
-              ? handleRuleCard(s.activeFilter as RuleFilter)
-              : handleAlertCard(s.activeFilter as AlertFilter)
-            }
-            style={{
-              background: s.active ? s.color : '#fff',
-              border: `1px solid ${s.active ? s.color : '#ebe8df'}`,
-              borderRadius: '12px', padding: '16px 20px',
-              cursor: 'pointer',
-              transition: 'all 0.18s',
-              boxShadow: s.active ? `0 4px 16px ${s.color}33` : 'none',
-            }}
-          >
-            <div style={{ fontSize: '22px', marginBottom: '6px' }}>{s.icon}</div>
-            <div style={{ fontSize: '26px', fontWeight: 700, color: s.active ? '#fff' : s.color }}>{s.value}</div>
-            <div style={{ fontSize: '12px', color: s.active ? 'rgba(255,255,255,0.85)' : '#64748b', marginTop: '2px' }}>
-              {s.label}
-            </div>
-            {s.active && (
-              <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.7)', marginTop: '4px', fontWeight: 500 }}>
-                ▼ filtered
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {/* Quick filter pills for Recent Alerts */}
-      {tab === 'recent' && (
-        <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', flexWrap: 'wrap' }}>
-          {([
-            { f: 'all', label: 'All Alerts', count: alerts.length },
-            { f: 'unacked', label: 'Unacknowledged', count: unacked },
-            { f: 'critical', label: 'Critical', count: criticalAlerts },
-            { f: 'high', label: 'High', count: alerts.filter(a => a.severity === 'high').length },
-          ] as { f: AlertFilter; label: string; count: number }[]).map(p => (
-            <button key={p.f} onClick={() => setAlertFilter(p.f)} style={{
-              padding: '5px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 500,
-              border: `1px solid ${alertFilter === p.f ? '#2563eb' : '#e2e8f0'}`,
-              background: alertFilter === p.f ? '#dbeafe' : '#fff',
-              color: alertFilter === p.f ? '#2563eb' : '#64748b',
-              cursor: 'pointer',
-            }}>
-              {p.label} <span style={{ opacity: 0.75 }}>({p.count})</span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: '4px', marginBottom: '16px', background: '#f8fafc', padding: '4px', borderRadius: '10px', width: 'fit-content' }}>
-        {(['recent', 'rules'] as const).map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{
-            padding: '7px 18px', borderRadius: '7px', border: 'none',
-            background: tab === t ? '#fff' : 'transparent',
-            color: tab === t ? '#1a1a1a' : '#64748b',
-            fontWeight: tab === t ? 600 : 400,
-            fontSize: '13px', cursor: 'pointer',
-            boxShadow: tab === t ? '0 1px 3px rgba(0,0,0,0.08)' : 'none'
-          }}>
-            {t === 'recent' ? `Recent Alerts (${filteredAlerts.length})` : `Alert Rules (${filteredRules.length})`}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button onClick={() => setShowSettings(true)} style={{ background: '#fff', border: '1px solid #93c5fd', padding: '7px 14px', borderRadius: '8px', cursor: 'pointer', fontSize: '12.5px', color: '#1d4ed8', fontWeight: 600 }}>
+            ⚙ Channel Settings
           </button>
-        ))}
+          <button onClick={runAutoDispatch} disabled={autoRunning || !cfg} style={{ background: '#16a34a', border: 'none', padding: '7px 14px', borderRadius: '8px', cursor: autoRunning ? 'not-allowed' : 'pointer', fontSize: '12.5px', color: '#fff', fontWeight: 600, opacity: autoRunning ? 0.6 : 1 }}>
+            {autoRunning ? 'Dispatching…' : '⚡ Run Auto-Dispatch'}
+          </button>
+          <ConnectionToolbar selectedId={selectedId} onChange={setSelectedId} onRefresh={refresh} refreshing={refreshing} connections={connections} conn={conn} />
+        </div>
       </div>
 
-      {/* Recent Alerts Tab */}
-      {tab === 'recent' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {filteredAlerts.length === 0 && (
-            <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8', fontSize: '13px' }}>
-              No alerts match this filter.
-            </div>
-          )}
-          {filteredAlerts.map(a => {
-            const ss = SEV[a.severity]
-            const isExpanded = expandedAlert === a.id
-            return (
-              <div
-                key={a.id}
-                onClick={() => setExpandedAlert(isExpanded ? null : a.id)}
-                style={{
-                  background: '#fff',
-                  border: `1px solid ${!a.ack ? ss.border : '#ebe8df'}`,
-                  borderLeft: `3px solid ${!a.ack ? ss.color : '#d1d5db'}`,
-                  borderRadius: '12px', cursor: 'pointer',
-                  opacity: a.ack && !isExpanded ? 0.75 : 1,
-                  transition: 'all 0.15s',
-                }}
-              >
-                {/* Row header */}
-                <div style={{ padding: '14px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px', flexWrap: 'wrap' }}>
-                      <span style={{ background: ss.bg, color: ss.color, padding: '2px 8px', borderRadius: '20px', fontSize: '11px', fontWeight: 600 }}>
-                        {a.severity}
-                      </span>
-                      <span style={{ fontWeight: 700, fontSize: '13.5px', color: '#1a1a1a' }}>{a.rule}</span>
-                      {a.ack && (
-                        <span style={{ background: '#f0fdf4', color: '#16a34a', padding: '1px 6px', borderRadius: '10px', fontSize: '10.5px', fontWeight: 600 }}>
-                          ✓ Acknowledged
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ fontSize: '13px', color: '#475569', marginBottom: '5px' }}>{a.message}</div>
-                    <div style={{ display: 'flex', gap: '14px', fontSize: '12px', color: '#94a3b8', flexWrap: 'wrap' }}>
-                      <span>Dataset: <strong style={{ color: '#475569' }}>{a.dataset}</strong></span>
-                      <span>Pipeline: <strong style={{ color: '#475569' }}>{a.pipeline}</strong></span>
-                      <span>Channel: <strong style={{ color: '#475569' }}>{a.channel}</strong></span>
-                      <span>{a.ts}</span>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexShrink: 0, marginLeft: '16px' }}>
-                    {!a.ack && (
-                      <button
-                        onClick={(e) => ack(a.id, e)}
-                        style={{
-                          padding: '5px 12px', borderRadius: '7px', border: '1px solid #e2e8f0',
-                          background: '#fff', color: '#475569', fontSize: '12px', cursor: 'pointer', fontWeight: 500
-                        }}
-                      >
-                        Acknowledge
-                      </button>
-                    )}
-                    <span style={{ color: '#94a3b8', fontSize: '16px', transform: isExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▾</span>
-                  </div>
-                </div>
+      <ConnectionBanner conn={conn} />
 
-                {/* Expanded detail */}
-                {isExpanded && (
-                  <div style={{ borderTop: '1px solid #f1f5f9' }} onClick={e => e.stopPropagation()}>
-                    {/* Metadata bar */}
-                    <div style={{ display: 'flex', background: '#fafaf9', borderBottom: '1px solid #f1f5f9' }}>
-                      {[
-                        { label: 'Dataset', value: a.dataset },
-                        { label: 'Pipeline', value: a.pipeline },
-                        { label: 'Channel', value: a.channel },
-                        { label: 'Affected Records', value: a.affectedRecords.toLocaleString('en-US') },
-                        { label: 'Fired At', value: a.ts },
-                      ].map((m, i, arr) => (
-                        <div key={i} style={{
-                          flex: 1, padding: '10px 16px',
-                          borderRight: i < arr.length - 1 ? '1px solid #f1f5f9' : 'none'
-                        }}>
-                          <div style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{m.label}</div>
-                          <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#334155', marginTop: '2px' }}>{m.value}</div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      {/* Root Cause */}
-                      <div style={{ borderRadius: '10px', overflow: 'hidden', border: '1px solid #e9d5ff' }}>
-                        <div style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', padding: '10px 16px' }}>
-                          <span style={{ color: '#fff', fontWeight: 700, fontSize: '12px', letterSpacing: '0.04em' }}>🔍 ROOT CAUSE</span>
-                        </div>
-                        <div style={{ padding: '14px 16px', background: '#faf5ff', fontSize: '13px', color: '#3b1f6e', lineHeight: '1.65' }}>
-                          {a.rootCause}
-                        </div>
-                      </div>
-
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                        {/* Business Impact */}
-                        <div style={{ borderRadius: '10px', overflow: 'hidden', border: `1px solid ${ss.border}` }}>
-                          <div style={{ background: a.severity === 'critical' ? '#dc2626' : a.severity === 'high' ? '#ea580c' : '#ca8a04', padding: '10px 16px' }}>
-                            <span style={{ color: '#fff', fontWeight: 700, fontSize: '12px', letterSpacing: '0.04em' }}>⚠️ BUSINESS IMPACT</span>
-                          </div>
-                          <div style={{ padding: '14px 16px', background: ss.bg, fontSize: '13px', color: '#334155', lineHeight: '1.65' }}>
-                            {a.impact}
-                          </div>
-                        </div>
-
-                        {/* Recommended Fix */}
-                        <div style={{ borderRadius: '10px', overflow: 'hidden', border: '1px solid #bbf7d0' }}>
-                          <div style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)', padding: '10px 16px' }}>
-                            <span style={{ color: '#fff', fontWeight: 700, fontSize: '12px', letterSpacing: '0.04em' }}>✅ RECOMMENDED FIX</span>
-                          </div>
-                          <div style={{ padding: '14px 16px', background: '#f0fdf4', fontSize: '13px', color: '#14532d', lineHeight: '1.65' }}>
-                            {a.recommendation}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      {/* Alert Rules Tab */}
-      {tab === 'rules' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {/* Rule filter pills */}
-          <div style={{ display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap' }}>
-            {([
-              { f: 'all', label: 'All Rules', count: rules.length },
-              { f: 'active', label: 'Active', count: activeRules },
-              { f: 'critical', label: 'Critical', count: rules.filter(r => r.severity === 'critical').length },
-              { f: 'triggered', label: 'Recently Triggered', count: triggeredRules },
-            ] as { f: RuleFilter; label: string; count: number }[]).map(p => (
-              <button key={p.f} onClick={() => setRuleFilter(p.f)} style={{
-                padding: '5px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 500,
-                border: `1px solid ${ruleFilter === p.f ? '#2563eb' : '#e2e8f0'}`,
-                background: ruleFilter === p.f ? '#dbeafe' : '#fff',
-                color: ruleFilter === p.f ? '#2563eb' : '#64748b',
-                cursor: 'pointer',
-              }}>
-                {p.label} <span style={{ opacity: 0.75 }}>({p.count})</span>
-              </button>
+      {/* Auto-dispatch banner */}
+      {cfg && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', background: '#fff', border: '1px solid #ebe8df', borderRadius: '10px', padding: '10px 16px', marginBottom: '14px', fontSize: '12.5px' }}>
+          <span style={{ fontSize: '16px' }}>⚡</span>
+          <span style={{ fontWeight: 600, color: '#1a1a1a' }}>Automated alert routing</span>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            {(['critical', 'warning', 'info'] as Severity[]).map(sev => (
+              <span key={sev} style={{ background: cfg.autoSend[sev] ? '#dcfce7' : '#f1f5f9', color: cfg.autoSend[sev] ? '#16a34a' : '#94a3b8', padding: '2px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 600, textTransform: 'capitalize' }}>
+                {cfg.autoSend[sev] ? '✓' : '○'} {sev}
+              </span>
             ))}
           </div>
+          <span style={{ color: '#94a3b8' }}>→</span>
+          <div style={{ display: 'flex', gap: '4px' }}>
+            {enabledChannels.length === 0 && <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>no channels enabled</span>}
+            {enabledChannels.map(ch => {
+              const m = CHANNEL_META[ch]
+              return <span key={ch} style={{ background: m.bg, color: m.color, padding: '2px 8px', borderRadius: '20px', fontSize: '11px', fontWeight: 600 }}>{m.icon} {m.label}</span>
+            })}
+          </div>
+          <span style={{ marginLeft: 'auto', color: '#94a3b8', fontSize: '11.5px' }}>
+            {counts.autoSent} alert{counts.autoSent === 1 ? '' : 's'} auto-dispatched
+          </span>
+        </div>
+      )}
 
-          {filteredRules.map(r => {
-            const ss = SEV[r.severity]
-            const isExpanded = expandedRule === r.id
+      {autoLog && (
+        <div style={{ background: '#0f172a', color: '#a5f3fc', borderRadius: '10px', padding: '14px 18px', fontFamily: 'monospace', fontSize: '11.5px', whiteSpace: 'pre-wrap', marginBottom: '14px' }}>
+          {autoLog}
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '18px' }}>
+        {[
+          { k: 'all',      label: 'Total',     val: counts.total,    color: '#475569', bg: '#f8fafc',  ro: false },
+          { k: 'critical', label: 'Critical',  val: counts.critical, color: '#dc2626', bg: '#fff1f2',  ro: false },
+          { k: 'warning',  label: 'Warning',   val: counts.warning,  color: '#d97706', bg: '#fffbeb',  ro: false },
+          { k: 'all',      label: 'Auto-sent', val: counts.autoSent, color: '#16a34a', bg: '#f0fdf4',  ro: true  },
+        ].map((s, i) => {
+          const active = !s.ro && filter === s.k
+          return (
+            <button key={i} onClick={() => !s.ro && setFilter(active ? 'all' : s.k as 'all' | Severity)} disabled={s.ro} style={{
+              background: active ? s.color : s.bg, border: `2px solid ${active ? s.color : 'transparent'}`,
+              borderRadius: '12px', padding: '14px 18px', cursor: s.ro ? 'default' : 'pointer', textAlign: 'left',
+              boxShadow: active ? `0 4px 14px ${s.color}40` : '0 1px 3px rgba(0,0,0,0.04)',
+            }}>
+              <div style={{ fontSize: '11px', color: active ? 'rgba(255,255,255,0.85)' : '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>{s.label}</div>
+              <div style={{ fontSize: '26px', fontWeight: 800, color: active ? '#fff' : s.color, marginTop: '4px' }}>{loading ? '—' : s.val}</div>
+            </button>
+          )
+        })}
+      </div>
+
+      {loading && <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>❄️ Loading alerts…</div>}
+      {error && <div style={{ background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: '10px', padding: '20px', color: '#dc2626' }}>{error}</div>}
+      {!loading && !error && filtered.length === 0 && (
+        <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '14px', padding: '40px', textAlign: 'center' }}>
+          <div style={{ fontSize: '32px' }}>✓</div>
+          <div style={{ fontSize: '15px', fontWeight: 600, color: '#16a34a', marginTop: '8px' }}>No active alerts</div>
+        </div>
+      )}
+
+      {!loading && !error && filtered.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {filtered.map(a => {
+            const isAcked = acked.has(a.id)
+            const wasAutoSent = !!cfg?.lastDispatched[a.id]
+            const sevColor = a.severity === 'critical' ? '#dc2626' : a.severity === 'warning' ? '#d97706' : '#0284c7'
+            const sevBg    = a.severity === 'critical' ? '#fee2e2' : a.severity === 'warning' ? '#fef3c7' : '#f0f9ff'
+            const isExpanded = expanded === a.id
             return (
-              <div
-                key={r.id}
-                onClick={() => setExpandedRule(isExpanded ? null : r.id)}
-                style={{
-                  background: '#fff',
-                  border: '1px solid #ebe8df',
-                  borderLeft: `3px solid ${r.enabled ? ss.color : '#d1d5db'}`,
-                  borderRadius: '12px', cursor: 'pointer',
-                  opacity: !r.enabled && !isExpanded ? 0.7 : 1,
-                  transition: 'all 0.15s',
-                }}
-              >
-                {/* Rule row */}
-                <div style={{ padding: '14px 20px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div style={{ flex: 2 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                      <span style={{ fontWeight: 700, fontSize: '13.5px', color: '#1a1a1a' }}>{r.name}</span>
-                      <span style={{ background: ss.bg, color: ss.color, padding: '2px 8px', borderRadius: '20px', fontSize: '11px', fontWeight: 600 }}>
-                        {r.severity}
-                      </span>
-                      {!r.enabled && (
-                        <span style={{ background: '#f1f5f9', color: '#94a3b8', padding: '2px 7px', borderRadius: '10px', fontSize: '10.5px', fontWeight: 500 }}>
-                          disabled
-                        </span>
-                      )}
+              <div key={a.id} style={{ background: isAcked ? '#fafafa' : '#fff', border: `1.5px solid ${isExpanded ? '#6366f1' : '#ebe8df'}`, borderRadius: '12px', overflow: 'hidden', opacity: isAcked ? 0.7 : 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', cursor: 'pointer' }} onClick={() => setExpanded(isExpanded ? null : a.id)}>
+                  <span style={{ background: sevBg, color: sevColor, padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase' }}>🔔 {a.severity}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: '#1a1a1a', textDecoration: isAcked ? 'line-through' : 'none' }}>{a.rule}</div>
+                    <div style={{ fontSize: '11.5px', color: '#94a3b8', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <span style={{ background: tableDomain(a.table).color + '18', color: tableDomain(a.table).color, padding: '1px 8px', borderRadius: '20px', fontSize: '10.5px', fontWeight: 700 }}>🏷 {a.domain}</span>
+                      <span style={{ color: '#475569' }}>👤 {a.owner}</span>
+                      <span style={{ fontFamily: 'monospace' }}>{conn?.schema}.{a.table}</span>
+                      <span>· {fmtDate(a.triggered)}</span>
+                      {wasAutoSent && <span style={{ background: '#dcfce7', color: '#16a34a', padding: '1px 8px', borderRadius: '20px', fontSize: '10.5px', fontWeight: 700 }}>✓ AUTO-SENT</span>}
                     </div>
-                    <div style={{ fontSize: '12px', color: '#64748b', fontFamily: 'monospace' }}>{r.condition}</div>
                   </div>
-                  <div style={{ flex: 1, fontSize: '12px', color: '#64748b' }}>
-                    <div style={{ fontWeight: 500, color: '#475569' }}>{r.datasets}</div>
-                    <div style={{ color: '#94a3b8', marginTop: '2px' }}>datasets</div>
-                  </div>
-                  <div style={{ flex: 1, fontSize: '12px', color: '#64748b' }}>
-                    <div style={{ fontWeight: 500, color: '#475569' }}>{r.channel}</div>
-                    <div style={{ color: '#94a3b8', marginTop: '2px' }}>channel</div>
-                  </div>
-                  <div style={{ textAlign: 'center', minWidth: '60px' }}>
-                    <div style={{ fontSize: '18px', fontWeight: 700, color: r.triggered > 0 ? '#dc2626' : '#16a34a' }}>{r.triggered}</div>
-                    <div style={{ fontSize: '10px', color: '#94a3b8' }}>triggered</div>
-                  </div>
-                  <div style={{ fontSize: '11.5px', color: '#94a3b8', minWidth: '120px', textAlign: 'right' }}>{r.lastFired}</div>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); toggleRule(r.id) }}
-                    style={{
-                      width: '44px', height: '24px', borderRadius: '12px', border: 'none',
-                      background: r.enabled ? '#2563eb' : '#e2e8f0',
-                      cursor: 'pointer', position: 'relative', transition: 'background 0.2s', flexShrink: 0
-                    }}
-                  >
-                    <span style={{
-                      position: 'absolute', top: '3px', left: r.enabled ? '22px' : '3px',
-                      width: '18px', height: '18px', borderRadius: '50%',
-                      background: '#fff', transition: 'left 0.2s', display: 'block'
-                    }} />
+                  <button onClick={(e) => { e.stopPropagation(); openSendDialog(a) }}
+                    style={{ background: '#1a1a1a', color: '#fff', padding: '5px 12px', borderRadius: '7px', border: 'none', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer' }}>
+                    📤 Send
                   </button>
-                  <span style={{ color: '#94a3b8', fontSize: '16px', transform: isExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▾</span>
+                  <button onClick={(e) => { e.stopPropagation(); setAcked(prev => { const next = new Set(prev); next.has(a.id) ? next.delete(a.id) : next.add(a.id); return next }) }}
+                    style={{ background: isAcked ? '#e2e8f0' : '#dbeafe', color: isAcked ? '#475569' : '#1d4ed8', padding: '5px 12px', borderRadius: '7px', border: 'none', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer' }}>
+                    {isAcked ? 'Acked ✓' : 'Acknowledge'}
+                  </button>
+                  <span style={{ color: '#94a3b8' }}>{isExpanded ? '▲' : '▼'}</span>
                 </div>
-
-                {/* Expanded rule detail */}
                 {isExpanded && (
-                  <div style={{ borderTop: '1px solid #f1f5f9' }} onClick={e => e.stopPropagation()}>
-                    {/* Metadata bar */}
-                    <div style={{ display: 'flex', background: '#fafaf9', borderBottom: '1px solid #f1f5f9' }}>
-                      {[
-                        { label: 'Owner', value: r.owner },
-                        { label: 'Cooldown', value: r.cooldown },
-                        { label: 'Times Triggered', value: r.triggered.toString() },
-                        { label: 'Last Fired', value: r.lastFired },
-                        { label: 'Status', value: r.enabled ? '✅ Active' : '⏸ Disabled' },
-                      ].map((m, i, arr) => (
-                        <div key={i} style={{
-                          flex: 1, padding: '10px 16px',
-                          borderRight: i < arr.length - 1 ? '1px solid #f1f5f9' : 'none'
-                        }}>
-                          <div style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{m.label}</div>
-                          <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#334155', marginTop: '2px' }}>{m.value}</div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      {/* Description + When it fires */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                        <div style={{ borderRadius: '10px', overflow: 'hidden', border: '1px solid #e9d5ff' }}>
-                          <div style={{ background: 'linear-gradient(135deg, #7c3aed, #6d28d9)', padding: '10px 16px' }}>
-                            <span style={{ color: '#fff', fontWeight: 700, fontSize: '12px', letterSpacing: '0.04em' }}>📋 RULE DESCRIPTION</span>
-                          </div>
-                          <div style={{ padding: '14px 16px', background: '#faf5ff', fontSize: '13px', color: '#3b1f6e', lineHeight: '1.65' }}>
-                            <div style={{ marginBottom: '10px' }}>{r.description}</div>
-                            <div style={{ fontSize: '12px', background: '#ede9fe', padding: '8px 10px', borderRadius: '6px', color: '#5b21b6', fontFamily: 'monospace' }}>
-                              {r.whenItFires}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div style={{ borderRadius: '10px', overflow: 'hidden', border: '1px solid #fde68a' }}>
-                          <div style={{ background: 'linear-gradient(135deg, #b45309, #d97706)', padding: '10px 16px' }}>
-                            <span style={{ color: '#fff', fontWeight: 700, fontSize: '12px', letterSpacing: '0.04em' }}>⚠️ BUSINESS CONTEXT</span>
-                          </div>
-                          <div style={{ padding: '14px 16px', background: '#fffbeb', fontSize: '13px', color: '#451a03', lineHeight: '1.65' }}>
-                            {r.businessContext}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Remediation */}
-                      <div style={{ borderRadius: '10px', overflow: 'hidden', border: '1px solid #bbf7d0' }}>
-                        <div style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)', padding: '10px 16px' }}>
-                          <span style={{ color: '#fff', fontWeight: 700, fontSize: '12px', letterSpacing: '0.04em' }}>✅ REMEDIATION PLAYBOOK</span>
-                        </div>
-                        <div style={{ padding: '14px 16px', background: '#f0fdf4', fontSize: '13px', color: '#14532d', lineHeight: '1.65' }}>
-                          {r.remediation}
-                        </div>
-                      </div>
-                    </div>
+                  <div style={{ borderTop: '1px solid #f1f5f9', padding: '14px 18px', background: '#fafaf9' }}>
+                    <div style={{ fontSize: '11px', color: '#dc2626', fontWeight: 700, marginBottom: '4px' }}>WHAT HAPPENED</div>
+                    <div style={{ fontSize: '13px', color: '#1a1a1a', marginBottom: '12px' }}>{a.context.detail}</div>
+                    <div style={{ fontSize: '11px', color: '#16a34a', fontWeight: 700, marginBottom: '4px' }}>RECOMMENDED ACTION</div>
+                    <div style={{ fontSize: '13px', color: '#1a1a1a' }}>{a.context.recommendation}</div>
                   </div>
                 )}
               </div>
@@ -604,6 +317,264 @@ export default function AlertsPage() {
           })}
         </div>
       )}
+
+      {/* ─── Channel Settings modal ──────────────────────────────────── */}
+      {showSettings && cfg && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '24px' }} onClick={() => setShowSettings(false)}>
+          <div style={{ background: '#fff', borderRadius: '14px', padding: '24px', maxWidth: '720px', width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
+              <div>
+                <div style={{ fontSize: '18px', fontWeight: 700, color: '#1a1a1a' }}>Automated Alert Channels</div>
+                <div style={{ fontSize: '12.5px', color: '#64748b', marginTop: '2px' }}>Configure where alerts get sent automatically when quality checks fail</div>
+              </div>
+              <button onClick={() => setShowSettings(false)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '20px' }}>✕</button>
+            </div>
+
+            {/* Auto-send rules */}
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '14px 18px', marginBottom: '16px' }}>
+              <div style={{ fontSize: '11px', color: '#475569', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '10px' }}>AUTO-DISPATCH RULES</div>
+              {(['critical', 'warning', 'info'] as Severity[]).map(sev => (
+                <div key={sev} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0' }}>
+                  <span style={{ fontSize: '13px', color: '#1a1a1a', textTransform: 'capitalize' }}>
+                    Auto-send <strong>{sev}</strong> alerts
+                  </span>
+                  <button onClick={() => setCfg({ ...cfg, autoSend: { ...cfg.autoSend, [sev]: !cfg.autoSend[sev] } })}
+                    style={{ width: '44px', height: '24px', borderRadius: '12px', border: 'none', background: cfg.autoSend[sev] ? '#16a34a' : '#e2e8f0', cursor: 'pointer', position: 'relative' }}>
+                    <span style={{ position: 'absolute', top: '3px', left: cfg.autoSend[sev] ? '22px' : '3px', width: '18px', height: '18px', borderRadius: '50%', background: '#fff', transition: 'left 0.15s', display: 'block' }} />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {/* Slack */}
+            <ChannelConfigBlock title="Slack Group" icon="💬" color="#7c3aed" bg="#f5f3ff" enabled={cfg.channels.slack.enabled}
+              onToggle={v => setCfg({ ...cfg, channels: { ...cfg.channels, slack: { ...cfg.channels.slack, enabled: v } } })}
+              helpUrl={{ label: 'Slack docs', href: 'https://api.slack.com/messaging/webhooks' }}
+              helpSteps={[
+                'Go to api.slack.com/apps and click "Create New App" → "From scratch".',
+                'Name it (e.g. "DataGuard Alerts") and pick the workspace.',
+                'In the left sidebar choose "Incoming Webhooks" and toggle it ON.',
+                'Click "Add New Webhook to Workspace" and pick the channel (e.g. #data-alerts).',
+                'Copy the Webhook URL (starts with https://hooks.slack.com/services/…) and paste it above.',
+              ]}>
+              <Field label="Incoming Webhook URL" value={cfg.channels.slack.webhookUrl}
+                placeholder="https://hooks.slack.com/services/T00/B00/XXX"
+                onChange={v => setCfg({ ...cfg, channels: { ...cfg.channels, slack: { ...cfg.channels.slack, webhookUrl: v } } })} />
+              <Field label="Group Name" value={cfg.channels.slack.groupName}
+                placeholder="#data-alerts"
+                onChange={v => setCfg({ ...cfg, channels: { ...cfg.channels, slack: { ...cfg.channels.slack, groupName: v } } })} />
+            </ChannelConfigBlock>
+
+            {/* Teams */}
+            <ChannelConfigBlock title="Microsoft Teams Group" icon="👥" color="#1d4ed8" bg="#eff6ff" enabled={cfg.channels.teams.enabled}
+              onToggle={v => setCfg({ ...cfg, channels: { ...cfg.channels, teams: { ...cfg.channels.teams, enabled: v } } })}
+              helpUrl={{ label: 'Teams docs', href: 'https://learn.microsoft.com/microsoftteams/platform/webhooks-and-connectors/how-to/add-incoming-webhook' }}
+              helpSteps={[
+                'In Teams, go to the channel where you want alerts (e.g. "Data Quality").',
+                'Click the "•••" next to the channel name → Manage channel → Connectors.',
+                'Find "Incoming Webhook" and click Configure / Add.',
+                'Name it "DataGuard Alerts", upload an icon if you want, click Create.',
+                'Copy the generated URL (https://yourorg.webhook.office.com/…) and paste it above.',
+              ]}>
+              <Field label="Incoming Webhook URL" value={cfg.channels.teams.webhookUrl}
+                placeholder="https://yourorg.webhook.office.com/webhookb2/XXX"
+                onChange={v => setCfg({ ...cfg, channels: { ...cfg.channels, teams: { ...cfg.channels.teams, webhookUrl: v } } })} />
+              <Field label="Channel Name" value={cfg.channels.teams.channelName}
+                placeholder="Data Quality"
+                onChange={v => setCfg({ ...cfg, channels: { ...cfg.channels, teams: { ...cfg.channels.teams, channelName: v } } })} />
+            </ChannelConfigBlock>
+
+            {/* Webex */}
+            <ChannelConfigBlock title="Webex Space" icon="🟢" color="#16a34a" bg="#f0fdf4" enabled={cfg.channels.webex.enabled}
+              onToggle={v => setCfg({ ...cfg, channels: { ...cfg.channels, webex: { ...cfg.channels.webex, enabled: v } } })}
+              helpUrl={{ label: 'Webex docs', href: 'https://apphub.webex.com/applications/incoming-webhooks-cisco-systems' }}
+              helpSteps={[
+                'Go to apphub.webex.com → search "Incoming Webhooks" → Connect.',
+                'Authorize the app for your Webex org.',
+                'Choose the space where alerts should arrive (e.g. "Data Alerts").',
+                'Name the webhook "DataGuard" and click Add.',
+                'Copy the generated URL (https://webexapis.com/v1/webhooks/incoming/…) and paste it above.',
+              ]}>
+              <Field label="Bot Webhook URL" value={cfg.channels.webex.webhookUrl}
+                placeholder="https://webexapis.com/v1/webhooks/incoming/XXX"
+                onChange={v => setCfg({ ...cfg, channels: { ...cfg.channels, webex: { ...cfg.channels.webex, webhookUrl: v } } })} />
+              <Field label="Space Name" value={cfg.channels.webex.spaceName}
+                placeholder="Data Alerts"
+                onChange={v => setCfg({ ...cfg, channels: { ...cfg.channels, webex: { ...cfg.channels.webex, spaceName: v } } })} />
+            </ChannelConfigBlock>
+
+            {/* Email */}
+            <ChannelConfigBlock title="Email" icon="📧" color="#475569" bg="#f1f5f9" enabled={cfg.channels.email.enabled}
+              onToggle={v => setCfg({ ...cfg, channels: { ...cfg.channels, email: { ...cfg.channels.email, enabled: v } } })}
+              helpSteps={[
+                'Add one or more recipient email addresses, separated by commas.',
+                'Outbound email requires an SMTP provider — set SENDGRID_API_KEY (or AWS_SES creds) as env vars in production.',
+                'In dev mode emails are queued for inspection rather than delivered.',
+              ]}>
+              <Field label="Recipients (comma-separated)" value={cfg.channels.email.recipients.join(', ')}
+                placeholder="alice@example.com, bob@example.com"
+                onChange={v => setCfg({ ...cfg, channels: { ...cfg.channels, email: { ...cfg.channels.email, recipients: v.split(',').map(s => s.trim()).filter(Boolean) } } })} />
+              <Field label="From Address" value={cfg.channels.email.fromAddress}
+                placeholder="alerts@dataguard.io"
+                onChange={v => setCfg({ ...cfg, channels: { ...cfg.channels, email: { ...cfg.channels.email, fromAddress: v } } })} />
+            </ChannelConfigBlock>
+
+            {/* PagerDuty */}
+            <ChannelConfigBlock title="PagerDuty" icon="🚨" color="#dc2626" bg="#fee2e2" enabled={cfg.channels.pagerduty.enabled}
+              onToggle={v => setCfg({ ...cfg, channels: { ...cfg.channels, pagerduty: { ...cfg.channels.pagerduty, enabled: v } } })}
+              helpUrl={{ label: 'PagerDuty docs', href: 'https://support.pagerduty.com/main/docs/services-and-integrations' }}
+              helpSteps={[
+                'Log in to PagerDuty → Services → choose or create a service.',
+                'Open the Integrations tab on that service → Add Integration.',
+                'Pick "Events API V2" and click Add.',
+                'Copy the 32-character Integration Key and paste it above as the Routing Key.',
+              ]}>
+              <Field label="Integration Routing Key" value={cfg.channels.pagerduty.routingKey}
+                placeholder="32-character integration key"
+                onChange={v => setCfg({ ...cfg, channels: { ...cfg.channels, pagerduty: { ...cfg.channels.pagerduty, routingKey: v } } })} />
+            </ChannelConfigBlock>
+
+            {saveMsg && (
+              <div style={{ background: saveMsg.startsWith('✓') ? '#f0fdf4' : '#fee2e2', color: saveMsg.startsWith('✓') ? '#16a34a' : '#dc2626', borderRadius: '8px', padding: '8px 14px', fontSize: '12.5px', marginBottom: '12px' }}>
+                {saveMsg}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '14px', borderTop: '1px solid #f3f1ea', paddingTop: '16px' }}>
+              <button onClick={() => setShowSettings(false)} style={{ padding: '8px 18px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', color: '#475569', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>Close</button>
+              <button onClick={saveConfig} disabled={saving} style={{ padding: '8px 18px', borderRadius: '8px', border: 'none', background: '#16a34a', color: '#fff', fontSize: '13px', fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.6 : 1 }}>
+                {saving ? 'Saving…' : 'Save Configuration'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Manual Send modal ───────────────────────────────────────── */}
+      {sendingFor && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => !sending && setSendingFor(null)}>
+          <div style={{ background: '#fff', borderRadius: '14px', padding: '24px', maxWidth: '520px', width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
+              <div>
+                <div style={{ fontSize: '17px', fontWeight: 700, color: '#1a1a1a' }}>Send Alert</div>
+                <div style={{ fontSize: '12.5px', color: '#64748b', marginTop: '2px' }}>{sendingFor.rule}</div>
+              </div>
+              <button onClick={() => setSendingFor(null)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '20px' }}>✕</button>
+            </div>
+            <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.06em', marginBottom: '8px' }}>CHANNELS</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginBottom: '16px' }}>
+              {(Object.entries(CHANNEL_META) as [Channel, typeof CHANNEL_META.email][]).map(([ch, m]) => {
+                const isEnabledInCfg = cfg?.channels[ch].enabled ?? false
+                const selected = selectedCh.has(ch)
+                return (
+                  <button key={ch} onClick={() => setSelectedCh(prev => { const n = new Set(prev); n.has(ch) ? n.delete(ch) : n.add(ch); return n })}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px',
+                      background: selected ? m.bg : '#fafaf9',
+                      border: `1.5px solid ${selected ? m.color : '#e2e8f0'}`,
+                      borderRadius: '10px', cursor: 'pointer', textAlign: 'left',
+                      opacity: isEnabledInCfg ? 1 : 0.5,
+                    }}>
+                    <span style={{ fontSize: '18px' }}>{m.icon}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: '13px', fontWeight: 600, color: selected ? m.color : '#475569' }}>{m.label}</div>
+                      <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>{isEnabledInCfg ? 'configured' : 'not configured'}</div>
+                    </div>
+                    <span style={{ color: selected ? m.color : '#cbd5e1', fontSize: '16px' }}>{selected ? '✓' : '○'}</span>
+                  </button>
+                )
+              })}
+            </div>
+            {selectedCh.has('email') && (
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.06em', display: 'block', marginBottom: '6px' }}>ADDITIONAL EMAIL TO</label>
+                <input value={emailTo} onChange={e => setEmailTo(e.target.value)} type="email"
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', boxSizing: 'border-box', color: '#0f172a', background: '#fafaf9' }} />
+              </div>
+            )}
+            <div style={{ background: '#f8fafc', borderRadius: '8px', padding: '12px 14px', marginBottom: '16px' }}>
+              <div style={{ fontSize: '10.5px', color: '#94a3b8', fontWeight: 700, marginBottom: '4px' }}>PREVIEW</div>
+              <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#1a1a1a', marginBottom: '4px' }}>
+                [{sendingFor.severity.toUpperCase()}] [{sendingFor.domain}] {sendingFor.rule}
+              </div>
+              <div style={{ fontSize: '11.5px', color: '#475569', marginBottom: '4px' }}>
+                🏷 {sendingFor.domain} · 👤 {sendingFor.owner} · <span style={{ fontFamily: 'monospace' }}>{conn?.schema}.{sendingFor.table}</span>
+              </div>
+              <div style={{ fontSize: '12px', color: '#475569' }}>{sendingFor.context.detail}</div>
+            </div>
+            {sendStatus && (
+              <div style={{ background: sendStatus.startsWith('✓') ? '#f0fdf4' : '#fee2e2', color: sendStatus.startsWith('✓') ? '#16a34a' : '#dc2626', border: `1px solid ${sendStatus.startsWith('✓') ? '#86efac' : '#fca5a5'}`, borderRadius: '8px', padding: '10px 14px', fontSize: '12px', fontFamily: 'monospace', whiteSpace: 'pre-wrap', marginBottom: '14px' }}>
+                {sendStatus}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button onClick={() => setSendingFor(null)} disabled={sending} style={{ padding: '8px 18px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', color: '#475569', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>Close</button>
+              <button onClick={dispatchAlert} disabled={sending || selectedCh.size === 0} style={{
+                padding: '8px 18px', borderRadius: '8px', border: 'none', background: '#1a1a1a', color: '#fff',
+                fontSize: '13px', fontWeight: 600, cursor: sending || selectedCh.size === 0 ? 'not-allowed' : 'pointer',
+                opacity: sending || selectedCh.size === 0 ? 0.6 : 1,
+              }}>
+                {sending ? 'Sending…' : `📤 Send to ${selectedCh.size}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ─── Channel config block ─────────────────────────────────────────────── */
+function ChannelConfigBlock({ title, icon, color, bg, enabled, onToggle, helpSteps, helpUrl, children }: {
+  title: string; icon: string; color: string; bg: string; enabled: boolean
+  onToggle: (v: boolean) => void
+  helpSteps?: string[]; helpUrl?: { label: string; href: string }
+  children: React.ReactNode
+}) {
+  const [showHelp, setShowHelp] = useState(false)
+  return (
+    <div style={{ background: '#fff', border: `1px solid ${enabled ? color : '#ebe8df'}`, borderRadius: '10px', padding: '14px 18px', marginBottom: '10px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: enabled ? '12px' : '0' }}>
+        <span style={{ background: bg, padding: '4px 8px', borderRadius: '8px', fontSize: '16px' }}>{icon}</span>
+        <span style={{ fontSize: '13.5px', fontWeight: 700, color: '#1a1a1a', flex: 1 }}>{title}</span>
+        <span style={{ fontSize: '11px', color: enabled ? color : '#94a3b8', fontWeight: 600 }}>{enabled ? 'ENABLED' : 'DISABLED'}</span>
+        <button onClick={() => onToggle(!enabled)} style={{ width: '44px', height: '24px', borderRadius: '12px', border: 'none', background: enabled ? color : '#e2e8f0', cursor: 'pointer', position: 'relative' }}>
+          <span style={{ position: 'absolute', top: '3px', left: enabled ? '22px' : '3px', width: '18px', height: '18px', borderRadius: '50%', background: '#fff', transition: 'left 0.15s' }} />
+        </button>
+      </div>
+      {enabled && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {children}
+          {helpSteps && (
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '8px', overflow: 'hidden' }}>
+              <button onClick={() => setShowHelp(!showHelp)} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 12px', width: '100%', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '11.5px', color: '#475569', fontWeight: 600, textAlign: 'left' }}>
+                <span style={{ color: color }}>{showHelp ? '▼' : '▶'}</span>
+                How do I get this webhook URL?
+                {helpUrl && (
+                  <a href={helpUrl.href} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ marginLeft: 'auto', color: color, fontWeight: 600, textDecoration: 'none', fontSize: '11px' }}>
+                    Open docs ↗
+                  </a>
+                )}
+              </button>
+              {showHelp && (
+                <ol style={{ margin: 0, padding: '0 12px 12px 32px', fontSize: '11.5px', color: '#475569', lineHeight: 1.6 }}>
+                  {helpSteps.map((s, i) => <li key={i} style={{ marginBottom: '2px' }}>{s}</li>)}
+                </ol>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Field({ label, value, placeholder, onChange }: { label: string; value: string; placeholder?: string; onChange: (v: string) => void }) {
+  return (
+    <div>
+      <label style={{ fontSize: '10.5px', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.04em', display: 'block', marginBottom: '4px' }}>{label.toUpperCase()}</label>
+      <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+        style={{ width: '100%', padding: '8px 12px', borderRadius: '7px', border: '1px solid #e2e8f0', fontSize: '12.5px', boxSizing: 'border-box', color: '#0f172a', background: '#fafaf9', fontFamily: label.includes('Webhook') || label.includes('Routing') ? 'monospace' : 'inherit' }} />
     </div>
   )
 }

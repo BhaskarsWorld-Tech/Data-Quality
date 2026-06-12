@@ -1,251 +1,390 @@
 'use client'
-import { useState } from 'react'
-import Link from 'next/link'
+import { useState, useEffect, useCallback } from 'react'
+import { ConnectionToolbar, ConnectionBanner, useOverviewData } from '@/components/shared/ConnectionToolbar'
 
-const ICONS = ['💰','📣','🚚','📦','⚙️','🌐','📊','🏥','🎓','🛒','🏗️','💡','🔬','📱','🎯']
-const COLORS = ['#2563eb','#ec4899','#f59e0b','#8b5cf6','#14b8a6','#ef4444','#16a34a','#0ea5e9','#f97316','#6366f1']
+interface Tbl { name: string; rows: number; columns: number; bytes: number; type: string }
 
-interface Domain {
-  id: string; name: string; icon: string; color: string; owner: string
-  datasets: number; rules: number; score: number; issues: number
-  connection: string; desc: string; tables: string[]
+interface CustomDomain {
+  id:       string
+  name:     string
+  icon:     string
+  color:    string
+  bg:       string
+  owner:    string
+  patterns: string[]
+  builtin?: boolean
 }
 
-const INITIAL: Domain[] = [
-  { id: 'd1', name: 'Finance', icon: '💰', color: '#2563eb', owner: 'Bhaskar R.', datasets: 3, rules: 14, score: 74, issues: 5, connection: 'SF_Codex', desc: 'Revenue, payments, and financial reporting data', tables: ['fact_orders', 'fact_payments', 'revenue_by_channel'] },
-  { id: 'd2', name: 'Marketing', icon: '📣', color: '#ec4899', owner: 'Priya M.', datasets: 3, rules: 12, score: 87, issues: 2, connection: 'SF_Codex', desc: 'Customer, campaign, and web analytics data', tables: ['dim_customers', 'web_sessions', 'customer_ltv'] },
-  { id: 'd3', name: 'Supply Chain', icon: '🚚', color: '#f59e0b', owner: 'Rajan S.', datasets: 1, rules: 5, score: 78, issues: 1, connection: 'SF_Codex', desc: 'Inventory, logistics, and warehouse operations', tables: ['fact_inventory'] },
-  { id: 'd4', name: 'Catalog', icon: '📦', color: '#8b5cf6', owner: 'Anil K.', datasets: 1, rules: 4, score: 91, issues: 0, connection: 'SF_Codex', desc: 'Product catalog, SKUs, and pricing data', tables: ['dim_products'] },
-  { id: 'd5', name: 'Operations', icon: '⚙️', color: '#14b8a6', owner: 'Rajan S.', datasets: 1, rules: 6, score: 79, issues: 1, connection: 'SF_Codex', desc: 'Returns, fulfillment, and operational metrics', tables: ['fact_returns'] },
+interface ResolvedDomain extends CustomDomain {
+  tables:    Tbl[]
+  totalRows: number
+  populated: number
+}
+
+/* ─── Built-in classification (used when no custom domain matches) ─────── */
+// Order matters — more specific prefixes first so MARKETING_CUSTOMERS
+// doesn't get swallowed by the Sales (CUSTOMER) pattern.
+const BUILT_IN: CustomDomain[] = [
+  { id: 'b-finance',      name: 'Finance',      icon: '💳', color: '#16a34a', bg: '#f0fdf4', owner: 'Finance Operations',
+    patterns: ['FINANCE','BUDGET','INVOICE','PAYMENT','TRANSACTION','LEDGER','GL_','REVENUE','EXPENSE','ACCOUNT'], builtin: true },
+  { id: 'b-marketing',    name: 'Marketing',    icon: '📣', color: '#db2777', bg: '#fdf2f8', owner: 'Marketing Team',
+    patterns: ['MARKETING','CAMPAIGN','LEAD','AD_SPEND','CHANNEL','AUDIENCE','SEGMENT','ATTRIBUTION','EMAIL_'], builtin: true },
+  { id: 'b-hr',           name: 'HR / People',  icon: '👤', color: '#ca8a04', bg: '#fefce8', owner: 'People Team',
+    patterns: ['EMPLOYEE','PAYROLL','BENEFITS','HIRE','ONBOARDING'], builtin: true },
+  { id: 'b-sales',        name: 'Sales',        icon: '💰', color: '#0891b2', bg: '#ecfeff', owner: 'Sales Operations',
+    patterns: ['CUSTOMER','SALE','OPPORTUNITY','PIPELINE','QUOTE'], builtin: true },
+  { id: 'b-supply-chain', name: 'Supply Chain', icon: '🚛', color: '#1d4ed8', bg: '#eff6ff', owner: 'Supply Chain Team',
+    patterns: ['SUPPLIER','PURCHASE','SHIPMENT','CARRIER','RETURN','FREIGHT','LOGISTICS'], builtin: true },
+  { id: 'b-catalog',      name: 'Catalog',      icon: '📦', color: '#7c3aed', bg: '#f5f3ff', owner: 'Product Catalog',
+    patterns: ['PRODUCT','CATEGORY','SKU','CATALOG'], builtin: true },
+  { id: 'b-operations',   name: 'Operations',   icon: '🏗️', color: '#ea580c', bg: '#fff7ed', owner: 'Operations Team',
+    patterns: ['INVENTORY','WAREHOUSE','STOCK'], builtin: true },
 ]
 
-function ScoreRing({ score, color }: { score: number; color: string }) {
-  const r = 28, circ = 2 * Math.PI * r
-  const dash = (score / 100) * circ
-  const c = score >= 90 ? '#16a34a' : score >= 80 ? '#ca8a04' : '#dc2626'
-  return (
-    <svg width="72" height="72" viewBox="0 0 72 72">
-      <circle cx="36" cy="36" r={r} fill="none" stroke="#f1f5f9" strokeWidth="6" />
-      <circle cx="36" cy="36" r={r} fill="none" stroke={c} strokeWidth="6" strokeDasharray={`${dash} ${circ - dash}`} strokeLinecap="round" transform="rotate(-90 36 36)" />
-      <text x="36" y="40" textAnchor="middle" fontSize="14" fontWeight="700" fill={c}>{score}</text>
-    </svg>
-  )
+const ICON_PALETTE = ['💰','🚛','📦','🏗️','📊','🔬','💳','📈','🛒','🏥','📡','🌐','⚙️','🎯','🔐','✈️','🏦','🎓','🍔','📰']
+const COLOR_PALETTE = [
+  { color: '#16a34a', bg: '#f0fdf4' }, { color: '#1d4ed8', bg: '#eff6ff' }, { color: '#7c3aed', bg: '#f5f3ff' },
+  { color: '#ea580c', bg: '#fff7ed' }, { color: '#dc2626', bg: '#fef2f2' }, { color: '#0891b2', bg: '#ecfeff' },
+  { color: '#db2777', bg: '#fdf2f8' }, { color: '#475569', bg: '#f8fafc' }, { color: '#ca8a04', bg: '#fefce8' },
+]
+
+/** Bucket each table into exactly one domain (first match wins). */
+function bucketize(tables: Tbl[], domains: CustomDomain[]): Map<string, Tbl[]> {
+  const buckets = new Map<string, Tbl[]>()
+  domains.forEach(d => buckets.set(d.id, []))
+  const otherKey = '_other'
+  buckets.set(otherKey, [])
+  tables.forEach(t => {
+    const u = t.name.toUpperCase()
+    const match = domains.find(d => d.patterns.some(p => u.includes(p)))
+    buckets.get(match?.id ?? otherKey)!.push(t)
+  })
+  return buckets
 }
 
-const lbl: React.CSSProperties = { fontSize: '12.5px', fontWeight: 500, color: '#374151', display: 'block', marginBottom: '6px' }
-const inp: React.CSSProperties = { width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', color: '#0f172a', background: '#fafaf9', boxSizing: 'border-box' }
-
 export default function DomainsPage() {
-  const [domains, setDomains] = useState<Domain[]>(INITIAL)
-  const [selected, setSelected] = useState<Domain | null>(null)
-  const [showModal, setShowModal] = useState(false)
-  const [editDomain, setEditDomain] = useState<Domain | null>(null)
-  const [form, setForm] = useState({ name: '', icon: '🌐', color: '#2563eb', owner: '', connection: 'SF_Codex', desc: '', tables: '' })
-  const [saving, setSaving] = useState(false)
+  const { connections, selectedId, setSelectedId, data: ovData, conn, loading, refreshing, error, refresh } =
+    useOverviewData<Tbl[]>(json => (json.tables as unknown as Tbl[]) ?? [])
 
-  function openAdd() {
-    setForm({ name: '', icon: '🌐', color: '#2563eb', owner: '', connection: 'SF_Codex', desc: '', tables: '' })
-    setEditDomain(null)
-    setShowModal(true)
-  }
+  const tables = ovData ?? []
 
-  function openEdit(d: Domain, e: React.MouseEvent) {
-    e.stopPropagation()
-    setForm({ name: d.name, icon: d.icon, color: d.color, owner: d.owner, connection: d.connection, desc: d.desc, tables: d.tables.join(', ') })
-    setEditDomain(d)
-    setShowModal(true)
-  }
+  /* ─── User-defined domains ──────────────────────────────────────────── */
+  const [userDomains, setUserDomains] = useState<CustomDomain[]>([])
+  const reloadDomains = useCallback(async () => {
+    const r = await fetch('/api/domains', { cache: 'no-store' })
+    if (r.ok) setUserDomains(await r.json() as CustomDomain[])
+  }, [])
+  useEffect(() => { reloadDomains() }, [reloadDomains])
 
-  function save() {
-    if (!form.name.trim()) return
-    setSaving(true)
-    const tables = form.tables.split(',').map(t => t.trim()).filter(Boolean)
-    if (editDomain) {
-      setDomains(prev => prev.map(d => d.id === editDomain.id ? { ...d, ...form, tables, datasets: tables.length || d.datasets } : d))
-      if (selected?.id === editDomain.id) setSelected(prev => prev ? { ...prev, ...form, tables, datasets: tables.length || prev.datasets } : null)
-    } else {
-      const newDomain: Domain = {
-        id: `d${Date.now()}`, name: form.name, icon: form.icon, color: form.color,
-        owner: form.owner, datasets: tables.length, rules: 0, score: 100, issues: 0,
-        connection: form.connection, desc: form.desc, tables,
+  /* ─── Merge user + built-in ─────────────────────────────────────────── */
+  // User-defined come FIRST so they match before built-ins (lets users override).
+  const allDomains: CustomDomain[] = [...userDomains, ...BUILT_IN]
+  const buckets    = bucketize(tables, allDomains)
+
+  const resolved: ResolvedDomain[] = [
+    ...allDomains.map(d => {
+      const tbls = buckets.get(d.id) ?? []
+      return {
+        ...d,
+        tables:    tbls,
+        totalRows: tbls.reduce((s, t) => s + t.rows, 0),
+        populated: tbls.filter(t => t.rows > 0).length,
       }
-      setDomains(prev => [...prev, newDomain])
-    }
-    setSaving(false)
-    setShowModal(false)
+    }),
+    // "Other" bucket — tables that match nothing
+    ((): ResolvedDomain => {
+      const tbls = buckets.get('_other') ?? []
+      return {
+        id: '_other', name: 'Unassigned', icon: '❓', color: '#94a3b8', bg: '#f8fafc',
+        owner: '— no domain matched —', patterns: [], builtin: true,
+        tables: tbls,
+        totalRows: tbls.reduce((s, t) => s + t.rows, 0),
+        populated: tbls.filter(t => t.rows > 0).length,
+      }
+    })(),
+  ].filter(d => d.tables.length > 0 || !d.builtin)   // hide empty built-ins, keep empty user domains
+
+  /* ─── Modal state ───────────────────────────────────────────────────── */
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const [showModal, setShowModal] = useState(false)
+  const [form, setForm] = useState<CustomDomain>({
+    id: '', name: '', icon: '📦', color: '#6366f1', bg: '#eef2ff', owner: '', patterns: [],
+  })
+  const [patternInput, setPatternInput] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
+
+  function openCreate() {
+    setForm({ id: '', name: '', icon: '📦', color: '#6366f1', bg: '#eef2ff', owner: '', patterns: [] })
+    setPatternInput('')
+    setSaveError('')
+    setShowModal(true)
   }
 
-  function deleteDomain(id: string, e: React.MouseEvent) {
-    e.stopPropagation()
-    if (!confirm('Delete this domain?')) return
-    setDomains(prev => prev.filter(d => d.id !== id))
-    if (selected?.id === id) setSelected(null)
+  function openEdit(d: CustomDomain) {
+    setForm({ ...d })
+    setPatternInput('')
+    setSaveError('')
+    setShowModal(true)
   }
 
+  async function saveForm() {
+    if (!form.name.trim()) { setSaveError('Name is required'); return }
+    setSaving(true); setSaveError('')
+    try {
+      const r = await fetch('/api/domains', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      })
+      const j = await r.json()
+      if (!r.ok || !j.ok) throw new Error(j.error ?? 'save failed')
+      setShowModal(false)
+      await reloadDomains()
+    } catch (e) { setSaveError((e as Error).message) }
+    finally     { setSaving(false) }
+  }
+
+  async function deleteDomain(id: string) {
+    if (!confirm('Delete this domain? Tables will be re-categorised by built-in rules.')) return
+    await fetch(`/api/domains?id=${id}`, { method: 'DELETE' })
+    await reloadDomains()
+  }
+
+  function addPattern() {
+    const p = patternInput.trim().toUpperCase()
+    if (!p) return
+    if (form.patterns.includes(p)) { setPatternInput(''); return }
+    setForm({ ...form, patterns: [...form.patterns, p] })
+    setPatternInput('')
+  }
+
+  function removePattern(p: string) {
+    setForm({ ...form, patterns: form.patterns.filter(x => x !== p) })
+  }
+
+  /* ─── Render ────────────────────────────────────────────────────────── */
   return (
     <div style={{ padding: '28px 36px', maxWidth: '1300px' }}>
-      <div style={{ fontSize: '12.5px', color: '#94a3b8', marginBottom: '8px' }}>Workspace · <span style={{ color: '#475569' }}>Analytics platform</span></div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
+      <div style={{ fontSize: '12.5px', color: '#94a3b8', marginBottom: '8px' }}>
+        Workspace · <span style={{ color: '#475569' }}>Analytics platform</span>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', gap: '12px' }}>
         <div>
           <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Domain Management</h1>
-          <p style={{ color: '#64748b', fontSize: '13px', margin: '4px 0 0' }}>Organize and govern data by business domain · {domains.length} domains</p>
+          <p style={{ color: '#64748b', fontSize: '13px', margin: '4px 0 0' }}>
+            {resolved.length} domain{resolved.length === 1 ? '' : 's'} ({userDomains.length} custom, {BUILT_IN.length} built-in) · {tables.length} live tables in {conn?.schema ?? ''}
+          </p>
         </div>
-        <button onClick={openAdd} style={{ background: '#dbeafe', border: '1px solid #93c5fd', padding: '8px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: 600, color: '#2563eb', cursor: 'pointer' }}>+ New Domain</button>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button onClick={openCreate}
+            style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', border: 'none', padding: '8px 16px', borderRadius: '9px', fontSize: '13px', fontWeight: 600, color: '#fff', cursor: 'pointer', boxShadow: '0 4px 14px rgba(99,102,241,0.3)' }}>
+            + Add Domain
+          </button>
+          <ConnectionToolbar selectedId={selectedId} onChange={setSelectedId} onRefresh={refresh} refreshing={refreshing} connections={connections} conn={conn} />
+        </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '28px' }}>
-        {[{ label: 'Total Domains', value: domains.length, icon: '🌐' }, { label: 'Total Datasets', value: domains.reduce((a, d) => a + d.datasets, 0), icon: '📦' }, { label: 'Total Rules', value: domains.reduce((a, d) => a + d.rules, 0), icon: '🛡️' }, { label: 'Avg Quality Score', value: domains.length ? Math.round(domains.reduce((a, d) => a + d.score, 0) / domains.length) + '%' : '—', icon: '📊' }].map(s => (
-          <div key={s.label} style={{ background: '#fff', border: '1px solid #ebe8df', borderRadius: '12px', padding: '16px 20px' }}>
-            <div style={{ fontSize: '22px', marginBottom: '6px' }}>{s.icon}</div>
-            <div style={{ fontSize: '26px', fontWeight: 700, color: '#1a1a1a' }}>{s.value}</div>
-            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>{s.label}</div>
-          </div>
-        ))}
-      </div>
+      <ConnectionBanner conn={conn} />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px,1fr))', gap: '16px' }}>
-        {domains.map(d => (
-          <div key={d.id} onClick={() => setSelected(selected?.id === d.id ? null : d)} style={{ background: '#fff', border: `2px solid ${selected?.id === d.id ? d.color : '#ebe8df'}`, borderRadius: '14px', padding: '20px 22px', cursor: 'pointer', transition: 'all 0.15s' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: `${d.color}18`, border: `1px solid ${d.color}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '24px' }}>{d.icon}</div>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: '16px', color: '#1a1a1a' }}>{d.name}</div>
-                  <div style={{ fontSize: '12px', color: '#94a3b8' }}>Owner: {d.owner || '—'}</div>
-                </div>
-              </div>
-              <ScoreRing score={d.score} color={d.color} />
-            </div>
+      {loading && <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>❄️ Grouping tables by domain…</div>}
+      {error && <div style={{ background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: '10px', padding: '20px', color: '#dc2626' }}>{error}</div>}
 
-            <div style={{ fontSize: '13px', color: '#64748b', marginBottom: '14px', lineHeight: '1.5' }}>{d.desc || 'No description'}</div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '8px', marginBottom: '14px' }}>
-              {[{ label: 'Datasets', value: d.datasets }, { label: 'Rules', value: d.rules }, { label: 'Issues', value: d.issues }].map(m => (
-                <div key={m.label} style={{ background: '#fafaf9', borderRadius: '8px', padding: '8px', textAlign: 'center', border: '1px solid #ebe8df' }}>
-                  <div style={{ fontSize: '18px', fontWeight: 700, color: m.label === 'Issues' && m.value > 0 ? '#dc2626' : '#1a1a1a' }}>{m.value}</div>
-                  <div style={{ fontSize: '11px', color: '#94a3b8' }}>{m.label}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* Edit / Delete actions */}
-            <div style={{ display: 'flex', gap: '6px', marginBottom: selected?.id === d.id ? '14px' : '0' }}>
-              <button onClick={e => openEdit(d, e)} style={{ flex: 1, padding: '6px', borderRadius: '7px', border: '1px solid #dbeafe', background: '#fff', color: '#2563eb', fontSize: '12px', fontWeight: 500, cursor: 'pointer' }}>✏️ Edit</button>
-              <button onClick={e => deleteDomain(d.id, e)} style={{ padding: '6px 10px', borderRadius: '7px', border: '1px solid #fee2e2', background: '#fff', color: '#ef4444', fontSize: '12px', cursor: 'pointer' }}>🗑</button>
-            </div>
-
-            {selected?.id === d.id && (
-              <div style={{ borderTop: '1px solid #f3f1ea', paddingTop: '12px' }}>
-                <div style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 600, marginBottom: '6px' }}>TABLES IN THIS DOMAIN</div>
-                {d.tables.length > 0 ? d.tables.map(t => (
-                  <div key={t} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '5px 0', borderBottom: '1px solid #f8fafc' }}>
-                    <span style={{ color: d.color, fontSize: '12px' }}>▸</span>
-                    <span style={{ fontFamily: 'monospace', fontSize: '12.5px', color: '#475569' }}>{t}</span>
-                    <Link href="/catalog" style={{ marginLeft: 'auto', fontSize: '11px', color: '#2563eb', textDecoration: 'none' }}>View →</Link>
+      {!loading && !error && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '14px' }}>
+          {resolved.map(d => {
+            const isExpanded = expanded === d.id
+            return (
+              <div key={d.id} style={{ background: '#fff', border: `1.5px solid ${isExpanded ? d.color : '#ebe8df'}`, borderRadius: '14px', overflow: 'hidden', transition: 'all 0.15s' }}>
+                <div style={{ padding: '16px 20px', cursor: 'pointer' }} onClick={() => setExpanded(isExpanded ? null : d.id)}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
+                    <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: d.bg, border: `1px solid ${d.color}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px' }}>{d.icon}</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <div style={{ fontSize: '15px', fontWeight: 700, color: '#1a1a1a' }}>{d.name}</div>
+                        {d.builtin
+                          ? <span style={{ background: '#f1f5f9', color: '#64748b', fontSize: '9.5px', fontWeight: 700, padding: '1px 7px', borderRadius: '20px', letterSpacing: '0.04em' }}>BUILT-IN</span>
+                          : <span style={{ background: '#eef2ff', color: '#6366f1', fontSize: '9.5px', fontWeight: 700, padding: '1px 7px', borderRadius: '20px', letterSpacing: '0.04em' }}>CUSTOM</span>}
+                      </div>
+                      <div style={{ fontSize: '11.5px', color: '#94a3b8' }}>👥 {d.owner || '—'}</div>
+                    </div>
+                    {!d.builtin && (
+                      <>
+                        <button onClick={e => { e.stopPropagation(); openEdit(d) }}
+                          style={{ background: '#fff', border: '1px solid #e2e8f0', padding: '4px 10px', borderRadius: '6px', fontSize: '11px', color: '#475569', cursor: 'pointer', fontWeight: 500 }}>✎ Edit</button>
+                        <button onClick={e => { e.stopPropagation(); deleteDomain(d.id) }}
+                          style={{ background: '#fff', border: '1px solid #fecaca', padding: '4px 10px', borderRadius: '6px', fontSize: '11px', color: '#dc2626', cursor: 'pointer', fontWeight: 500 }}>🗑 Delete</button>
+                      </>
+                    )}
+                    <span style={{ color: '#94a3b8' }}>{isExpanded ? '▲' : '▼'}</span>
                   </div>
-                )) : <div style={{ fontSize: '12.5px', color: '#94a3b8', fontStyle: 'italic' }}>No tables assigned yet</div>}
-                <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
-                  <Link href="/issues" style={{ flex: 1, padding: '7px', borderRadius: '7px', border: '1px solid #fee2e2', background: '#fff', color: '#dc2626', fontSize: '12px', fontWeight: 500, textAlign: 'center', textDecoration: 'none' }}>View Issues</Link>
-                  <Link href="/rules" style={{ flex: 1, padding: '7px', borderRadius: '7px', border: '1px solid #dbeafe', background: '#fff', color: '#2563eb', fontSize: '12px', fontWeight: 500, textAlign: 'center', textDecoration: 'none' }}>View Rules</Link>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                    <div style={{ background: d.bg, padding: '8px 10px', borderRadius: '8px' }}>
+                      <div style={{ fontSize: '9.5px', color: d.color, fontWeight: 700 }}>TABLES</div>
+                      <div style={{ fontSize: '18px', fontWeight: 800, color: d.color }}>{d.tables.length}</div>
+                    </div>
+                    <div style={{ background: d.bg, padding: '8px 10px', borderRadius: '8px' }}>
+                      <div style={{ fontSize: '9.5px', color: d.color, fontWeight: 700 }}>POPULATED</div>
+                      <div style={{ fontSize: '18px', fontWeight: 800, color: d.color }}>{d.populated}</div>
+                    </div>
+                    <div style={{ background: d.bg, padding: '8px 10px', borderRadius: '8px' }}>
+                      <div style={{ fontSize: '9.5px', color: d.color, fontWeight: 700 }}>ROWS</div>
+                      <div style={{ fontSize: '18px', fontWeight: 800, color: d.color }}>{d.totalRows.toLocaleString()}</div>
+                    </div>
+                  </div>
                 </div>
+                {isExpanded && (
+                  <div style={{ borderTop: '1px solid #f1f5f9', padding: '14px 20px', background: '#fafaf9' }}>
+                    {d.patterns.length > 0 && (
+                      <div style={{ marginBottom: '10px' }}>
+                        <div style={{ fontSize: '10.5px', color: '#475569', fontWeight: 700, marginBottom: '4px', textTransform: 'uppercase' }}>Match patterns</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px' }}>
+                          {d.patterns.map(p => (
+                            <span key={p} style={{ background: d.bg, color: d.color, padding: '2px 9px', borderRadius: '20px', fontSize: '11px', fontWeight: 600, fontFamily: 'monospace' }}>{p}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <div style={{ fontSize: '11px', color: '#475569', fontWeight: 700, marginBottom: '8px', textTransform: 'uppercase' }}>Tables in this domain</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {d.tables.length === 0 && (
+                        <div style={{ fontSize: '12.5px', color: '#94a3b8', fontStyle: 'italic' }}>
+                          No tables match this domain&apos;s patterns yet.
+                        </div>
+                      )}
+                      {d.tables.map(t => (
+                        <div key={t.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: '#fff', borderRadius: '8px' }}>
+                          <div style={{ fontFamily: 'monospace', fontSize: '12.5px', fontWeight: 600 }}>{t.name}</div>
+                          <div style={{ display: 'flex', gap: '12px', fontSize: '11.5px', color: '#475569' }}>
+                            <span>{t.columns} cols</span>
+                            <span style={{ color: t.rows > 0 ? '#16a34a' : '#94a3b8', fontWeight: 600 }}>{t.rows.toLocaleString()} rows</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        ))}
+            )
+          })}
+        </div>
+      )}
 
-        {domains.length === 0 && (
-          <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '60px', background: '#fff', borderRadius: '14px', border: '2px dashed #e2e8f0' }}>
-            <div style={{ fontSize: '40px', marginBottom: '12px' }}>🌐</div>
-            <div style={{ fontSize: '16px', fontWeight: 600, color: '#1a1a1a', marginBottom: '8px' }}>No domains yet</div>
-            <div style={{ color: '#64748b', fontSize: '13px', marginBottom: '20px' }}>Create your first business domain to organize data assets</div>
-            <button onClick={openAdd} style={{ background: '#dbeafe', border: '1px solid #93c5fd', padding: '10px 20px', borderRadius: '8px', fontSize: '13px', fontWeight: 600, color: '#2563eb', cursor: 'pointer' }}>+ New Domain</button>
-          </div>
-        )}
-      </div>
-
-      {/* Add / Edit Modal */}
+      {/* ─── Add/Edit Domain Modal ────────────────────────────────────── */}
       {showModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300, backdropFilter: 'blur(4px)' }}>
-          <div style={{ background: '#fff', borderRadius: '16px', width: '520px', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 24px 64px rgba(0,0,0,0.2)' }}>
-            <div style={{ padding: '22px 24px', borderBottom: '1px solid #ebe8df', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div onClick={() => !saving && setShowModal(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '24px' }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: '14px', padding: '24px', maxWidth: '600px', width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
               <div>
-                <div style={{ fontSize: '17px', fontWeight: 700, color: '#1a1a1a' }}>{editDomain ? '✏️ Edit Domain' : '+ New Domain'}</div>
-                <div style={{ fontSize: '12.5px', color: '#64748b', marginTop: '2px' }}>{editDomain ? 'Update domain details' : 'Create a new business domain'}</div>
+                <div style={{ fontSize: '18px', fontWeight: 700, color: '#1a1a1a' }}>{form.id ? 'Edit Domain' : 'Add Domain'}</div>
+                <div style={{ fontSize: '12.5px', color: '#64748b', marginTop: '2px' }}>Group tables into a business domain by matching column patterns against their names.</div>
               </div>
-              <button onClick={() => setShowModal(false)} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', width: '30px', height: '30px', borderRadius: '8px', cursor: 'pointer', color: '#64748b', fontSize: '14px' }}>✕</button>
+              <button onClick={() => setShowModal(false)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: '20px' }}>✕</button>
             </div>
 
-            <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {/* Name */}
-              <div>
-                <label style={lbl}>Domain Name *</label>
-                <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Finance, Marketing, Supply Chain" style={inp} />
-              </div>
+            {/* Name + Owner */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '14px' }}>
+              <Field label="Name" value={form.name} onChange={v => setForm({ ...form, name: v })} placeholder="Finance, Marketing, HR…" required />
+              <Field label="Owner / Team" value={form.owner} onChange={v => setForm({ ...form, owner: v })} placeholder="Finance Operations" />
+            </div>
 
-              {/* Icon picker */}
-              <div>
-                <label style={lbl}>Icon</label>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                  {ICONS.map(ic => (
-                    <button key={ic} onClick={() => setForm(f => ({ ...f, icon: ic }))} style={{ width: '36px', height: '36px', borderRadius: '8px', border: `2px solid ${form.icon === ic ? '#2563eb' : '#e2e8f0'}`, background: form.icon === ic ? '#dbeafe' : '#fafaf9', fontSize: '18px', cursor: 'pointer' }}>{ic}</button>
+            {/* Icon picker */}
+            <div style={{ marginBottom: '14px' }}>
+              <Label>Icon</Label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '4px' }}>
+                {ICON_PALETTE.map(ic => (
+                  <button key={ic} onClick={() => setForm({ ...form, icon: ic })}
+                    style={{ width: '36px', height: '36px', borderRadius: '8px', border: form.icon === ic ? `2px solid ${form.color}` : '1px solid #e2e8f0', background: form.icon === ic ? form.bg : '#fff', fontSize: '18px', cursor: 'pointer' }}>
+                    {ic}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Color picker */}
+            <div style={{ marginBottom: '14px' }}>
+              <Label>Colour theme</Label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '4px' }}>
+                {COLOR_PALETTE.map(c => (
+                  <button key={c.color} onClick={() => setForm({ ...form, color: c.color, bg: c.bg })}
+                    title={c.color}
+                    style={{ width: '36px', height: '36px', borderRadius: '8px', border: form.color === c.color ? `3px solid ${c.color}` : '1px solid #e2e8f0', background: c.bg, cursor: 'pointer', position: 'relative' }}>
+                    <span style={{ position: 'absolute', inset: '6px', borderRadius: '50%', background: c.color }} />
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Patterns */}
+            <div style={{ marginBottom: '14px' }}>
+              <Label>Table-name patterns</Label>
+              <div style={{ fontSize: '11.5px', color: '#94a3b8', marginBottom: '6px' }}>
+                Substrings to match against table names (case-insensitive). A table is assigned to this domain if its name <strong>contains any</strong> of these.
+              </div>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <input value={patternInput}
+                  onChange={e => setPatternInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addPattern() } }}
+                  placeholder="e.g. INVOICE, PAYMENT, BILLING"
+                  style={{ flex: 1, padding: '9px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', background: '#fafaf9', boxSizing: 'border-box', color: '#0f172a', fontFamily: 'monospace' }}
+                />
+                <button onClick={addPattern}
+                  style={{ background: form.color, color: '#fff', border: 'none', padding: '0 14px', borderRadius: '8px', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}>+ Add</button>
+              </div>
+              {form.patterns.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '8px' }}>
+                  {form.patterns.map(p => (
+                    <span key={p} style={{ background: form.bg, color: form.color, padding: '4px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '6px', fontFamily: 'monospace' }}>
+                      {p}
+                      <button onClick={() => removePattern(p)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: form.color, fontSize: '14px', padding: 0, lineHeight: 1 }}>×</button>
+                    </span>
                   ))}
                 </div>
-              </div>
+              )}
+            </div>
 
-              {/* Color picker */}
-              <div>
-                <label style={lbl}>Color</label>
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  {COLORS.map(c => (
-                    <button key={c} onClick={() => setForm(f => ({ ...f, color: c }))} style={{ width: '28px', height: '28px', borderRadius: '50%', background: c, border: form.color === c ? '3px solid #1a1a1a' : '2px solid transparent', cursor: 'pointer' }} />
-                  ))}
-                </div>
-              </div>
-
-              {/* Preview */}
-              <div style={{ background: '#fafaf9', borderRadius: '10px', padding: '12px 14px', border: '1px solid #ebe8df', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: `${form.color}18`, border: `1px solid ${form.color}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px' }}>{form.icon}</div>
+            {/* Live preview */}
+            <div style={{ background: form.bg, border: `1px solid ${form.color}40`, borderRadius: '10px', padding: '12px 16px', marginBottom: '14px' }}>
+              <div style={{ fontSize: '10px', color: form.color, fontWeight: 700, marginBottom: '6px' }}>PREVIEW · matches {tables.filter(t => form.patterns.some(p => t.name.toUpperCase().includes(p))).length} live table(s)</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: '#fff', border: `1px solid ${form.color}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>{form.icon}</div>
                 <div>
-                  <div style={{ fontWeight: 700, color: '#1a1a1a', fontSize: '14px' }}>{form.name || 'Domain Name'}</div>
-                  <div style={{ fontSize: '12px', color: form.color, fontWeight: 600 }}>Preview</div>
+                  <div style={{ fontSize: '14px', fontWeight: 700, color: form.color }}>{form.name || '— name —'}</div>
+                  <div style={{ fontSize: '11px', color: '#475569' }}>👥 {form.owner || '— no owner —'}</div>
                 </div>
               </div>
+            </div>
 
-              {/* Owner */}
-              <div>
-                <label style={lbl}>Owner</label>
-                <input value={form.owner} onChange={e => setForm(f => ({ ...f, owner: e.target.value }))} placeholder="e.g. Bhaskar R." style={inp} />
-              </div>
+            {saveError && (
+              <div style={{ background: '#fee2e2', color: '#dc2626', borderRadius: '8px', padding: '8px 14px', fontSize: '12.5px', marginBottom: '12px' }}>{saveError}</div>
+            )}
 
-              {/* Connection */}
-              <div>
-                <label style={lbl}>Connection</label>
-                <input value={form.connection} onChange={e => setForm(f => ({ ...f, connection: e.target.value }))} placeholder="SF_Codex" style={inp} />
-              </div>
-
-              {/* Description */}
-              <div>
-                <label style={lbl}>Description</label>
-                <textarea value={form.desc} onChange={e => setForm(f => ({ ...f, desc: e.target.value }))} placeholder="Describe what data this domain covers…" rows={2} style={{ ...inp, resize: 'vertical' }} />
-              </div>
-
-              {/* Tables */}
-              <div>
-                <label style={lbl}>Tables (comma-separated)</label>
-                <input value={form.tables} onChange={e => setForm(f => ({ ...f, tables: e.target.value }))} placeholder="fact_orders, dim_customers, revenue_by_channel" style={inp} />
-                <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>Enter table names separated by commas</div>
-              </div>
-
-              <div style={{ display: 'flex', gap: '10px', paddingTop: '4px' }}>
-                <button onClick={() => setShowModal(false)} style={{ flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: '13px', fontWeight: 500, cursor: 'pointer' }}>Cancel</button>
-                <button onClick={save} disabled={saving || !form.name.trim()} style={{ flex: 2, padding: '10px', borderRadius: '8px', border: 'none', fontSize: '13px', fontWeight: 600, cursor: form.name.trim() ? 'pointer' : 'not-allowed', background: form.name.trim() ? '#2563eb' : '#e2e8f0', color: form.name.trim() ? '#fff' : '#94a3b8' }}>
-                  {editDomain ? '✓ Save Changes' : '+ Create Domain'}
-                </button>
-              </div>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', paddingTop: '14px', borderTop: '1px solid #f3f1ea' }}>
+              <button onClick={() => setShowModal(false)} disabled={saving}
+                style={{ padding: '9px 18px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', color: '#475569', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={saveForm} disabled={saving}
+                style={{ padding: '9px 18px', borderRadius: '8px', border: 'none', background: form.color, color: '#fff', fontSize: '13px', fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.6 : 1 }}>
+                {saving ? 'Saving…' : (form.id ? 'Save Changes' : 'Create Domain')}
+              </button>
             </div>
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function Label({ children }: { children: React.ReactNode }) {
+  return <label style={{ fontSize: '11px', color: '#475569', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{children}</label>
+}
+function Field({ label, value, onChange, placeholder, required }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; required?: boolean }) {
+  return (
+    <div>
+      <label style={{ fontSize: '11px', color: '#475569', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', display: 'block', marginBottom: '4px' }}>
+        {label}{required && <span style={{ color: '#dc2626' }}> *</span>}
+      </label>
+      <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+        style={{ width: '100%', padding: '9px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px', background: '#fafaf9', boxSizing: 'border-box', color: '#0f172a' }} />
     </div>
   )
 }

@@ -3,30 +3,40 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
+    "dev":            "next dev",
+    "build":          "next build",
+    "start":          "next start",
+    "lint":           "eslint",
+
+    "build:cf":       "rm -rf .next .open-next && OPEN_NEXT_CLOUDFLARE=1 next build && OPEN_NEXT_CLOUDFLARE=1 opennextjs-cloudflare build",
+    "preview:cf":     "npm run build:cf && wrangler dev",
+    "deploy":         "npm run build:cf && wrangler deploy --env preview",
+    "deploy:prod":    "npm run build:cf && wrangler deploy --env production",
+    "cf:tail":        "wrangler tail",
+    "cf:setup":       "./deploy/setup-cloudflare.sh",
+    "cf:rollback":    "wrangler rollback"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.94.0",
-    "clsx": "^2.1.1",
-    "lucide-react": "^1.14.0",
-    "next": "16.2.4",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
-    "recharts": "^3.8.1",
-    "snowflake-sdk": "^2.4.0",
-    "tailwind-merge": "^3.5.0"
+    "clsx":              "^2.1.1",
+    "lucide-react":      "^1.14.0",
+    "next":              "16.2.6",
+    "react":             "19.2.4",
+    "react-dom":         "19.2.4",
+    "recharts":          "^3.8.1",
+    "tailwind-merge":    "^3.5.0"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.2.4",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+    "@cloudflare/workers-types":  "^4.20240605.0",
+    "@opennextjs/cloudflare":     "1.19.10",
+    "@tailwindcss/postcss":       "^4",
+    "@types/node":                "^20",
+    "@types/react":               "^19",
+    "@types/react-dom":           "^19",
+    "eslint":                     "^9",
+    "eslint-config-next":         "16.2.4",
+    "tailwindcss":                "^4",
+    "typescript":                 "^5",
+    "wrangler":                   "4.92.0"
   }
 }

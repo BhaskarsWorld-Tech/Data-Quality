@@ -39,3 +39,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Cloudflare / Wrangler
+.open-next/
+.wrangler/
+.dev.vars
+wrangler.toml.bak
+
+# Local config files that hold real secrets. Real values live in
+# Cloudflare Workers secrets (prod) or .dev.vars (local).
+data/agent-config.json

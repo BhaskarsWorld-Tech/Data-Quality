@@ -89,5 +89,19 @@
     "enabled": true,
     "severity": "medium",
     "createdAt": "2026-04-12T08:00:00Z"
+  },
+  {
+    "id": "rule_1778824724411_ev057yhwz",
+    "name": "PII Null Check - Email",
+    "description": "Ensures the email column in CUSTOMERS table is not null to maintain PII data completeness",
+    "category": "completeness",
+    "type": "not_null",
+    "connectionId": "conn_1",
+    "tableName": "CUSTOMERS",
+    "columnName": "email",
+    "parameters": {},
+    "enabled": true,
+    "severity": "critical",
+    "createdAt": "2026-05-15T05:58:44.411Z"
   }
 ]

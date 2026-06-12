@@ -28,6 +28,48 @@ body {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Sidebar nav — instant CSS tooltips (no 500ms native title delay)
+   ──────────────────────────────────────────────────────────────────────── */
+.dg-nav-item .dg-nav-tooltip {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: #0f172a;
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  padding: 4px 10px;
+  border-radius: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.05s ease-out;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.18);
+}
+.dg-nav-item:hover .dg-nav-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;        /* instant */
+}
+.dg-nav-item:hover {
+  background: #f1f5f9 !important;
+}
+/* Tooltip arrow pointing left */
+.dg-nav-item .dg-nav-tooltip::before {
+  content: '';
+  position: absolute;
+  right: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 4px solid transparent;
+  border-right-color: #0f172a;
+}
 .fade-in { animation: fadeIn 0.3s ease forwards; }
 
 @keyframes slideUp {

@@ -1,398 +1,207 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { ConnectionToolbar, ConnectionBanner, SfConn, ConnectionListItem } from '@/components/shared/ConnectionToolbar'
 
-type ContractStatus = 'active' | 'breached' | 'warning'
-type FilterType = 'all' | 'active' | 'breached'
-
-interface TermCheck {
-  term: string
-  status: 'pass' | 'fail' | 'warn'
-  detail: string
-}
-
+interface Column { name: string; type: string; nullable: string; position: number }
+interface SchemaTable { name: string; type: string; rows: number; bytes: number; columns: Column[] }
 interface Contract {
-  id: string; name: string; producer: string; consumer: string
-  owner: string; status: ContractStatus; compliance: number
-  checks: number; failures: number; created: string
-  connection: string; description: string; sla: string
-  terms: TermCheck[]
-  breachReason?: string
-  breachImpact?: string
-  breachRecommendation?: string
-  lastChecked: string
-  trend: string
+  id: string; name: string; table: string
+  status: 'valid' | 'drift' | 'pending'
+  version: string; consumers: string[]
+  columns: Column[]
+  rowCount: number
 }
 
-const contracts: Contract[] = [
-  {
-    id: 'ct1', name: 'Orders → Revenue Model',
-    producer: 'fact_orders', consumer: 'revenue_by_channel',
-    owner: 'Bhaskar R.', status: 'active', compliance: 98,
-    checks: 8, failures: 0, created: '2026-01-15',
-    connection: 'SF_Codex', sla: '99%', lastChecked: '2026-05-05 17:00', trend: '↑ +2% vs last week',
-    description: 'Orders table must have non-null revenue, valid currency, and row count > 10K daily.',
-    terms: [
-      { term: 'NOT NULL: revenue, order_id', status: 'pass', detail: '0 nulls across 4.2M rows' },
-      { term: 'Revenue > 0', status: 'pass', detail: '99.8% pass — 8,400 rows flagged as warnings (returns)' },
-      { term: 'Row count ≥ 10,000/day', status: 'pass', detail: '4,200,000 rows — well above threshold' },
-      { term: 'Freshness < 4h', status: 'pass', detail: 'Last update 42 minutes ago' },
-      { term: 'No duplicate order_ids', status: 'pass', detail: 'UNIQUE check passed on all 4.2M rows' },
-      { term: 'Currency code in ISO 4217', status: 'pass', detail: '100% of currency_code values valid' },
-      { term: 'Order status in allowed set', status: 'pass', detail: 'All values in [pending, confirmed, shipped, returned, cancelled]' },
-      { term: 'order_date not in future', status: 'pass', detail: '0 rows with future dates' },
-    ],
-  },
-  {
-    id: 'ct2', name: 'Customers → Marketing Platform',
-    producer: 'dim_customers', consumer: 'Marketing CDP',
-    owner: 'Priya M.', status: 'warning', compliance: 83,
-    checks: 12, failures: 2, created: '2026-02-01',
-    connection: 'SF_Codex', sla: '95%', lastChecked: '2026-05-05 12:00', trend: '↓ -11% vs last week',
-    description: 'Customer data exported to CDP must have valid emails, consent flags, and segment assignments.',
-    breachReason: 'Two checks are failing due to a CRM batch import on 2026-05-05 that skipped email validation and omitted the consent_flag field for 363,000 records. Compliance dropped from 94% to 83%, breaching the 95% SLA target.',
-    breachImpact: 'Marketing CDP is syncing invalid customer records, causing hard bounces in email campaigns and GDPR compliance risk for the 143K records missing consent flags.',
-    breachRecommendation: 'Quarantine the 220K invalid email records. Re-request corrected data from CRM vendor. Add mandatory validation to the import pipeline. Resolve within 24h to restore SLA compliance.',
-    terms: [
-      { term: 'Email format valid', status: 'fail', detail: '220,000 of 1.1M records (20%) have malformed emails — missing "@" or TLD. Introduced by CRM import on 2026-05-05.' },
-      { term: 'Consent flag NOT NULL', status: 'fail', detail: '143,000 records have NULL consent_flag. Batch update script did not set default values for new GDPR fields.' },
-      { term: 'Segment must be in [Enterprise, SMB, Consumer]', status: 'pass', detail: 'All 1.1M records have valid segment values' },
-      { term: 'No PII in free-text fields', status: 'pass', detail: 'PII scan passed — no SSN, CC, or passport patterns found' },
-      { term: 'Freshness < 24h', status: 'pass', detail: 'Last sync 11h ago — within SLA' },
-      { term: 'customer_id unique', status: 'pass', detail: 'No duplicate customer IDs' },
-      { term: 'Country code in ISO 3166', status: 'pass', detail: '100% valid country codes' },
-      { term: 'Segment not NULL', status: 'pass', detail: '0 null segments' },
-      { term: 'Age ≥ 0 if present', status: 'pass', detail: 'No negative ages' },
-      { term: 'Phone format valid if present', status: 'pass', detail: '98.2% of phone numbers are valid E.164 format' },
-      { term: 'Signup date ≤ today', status: 'pass', detail: 'No future signup dates' },
-      { term: 'Tier in [Gold, Silver, Bronze, None]', status: 'pass', detail: 'All tier values valid' },
-    ],
-  },
-  {
-    id: 'ct3', name: 'Payments → Finance Reports',
-    producer: 'fact_payments', consumer: 'finance_weekly_report',
-    owner: 'Bhaskar R.', status: 'breached', compliance: 61,
-    checks: 6, failures: 3, created: '2026-01-20',
-    connection: 'SF_Codex', sla: '99.9%', lastChecked: '2026-05-05 05:30', trend: '↓ -31% vs last week',
-    description: 'Payment data for finance must reconcile with bank statements within 0.01%.',
-    breachReason: 'Three critical checks are failing: (1) 1,482,000 rows have NULL payment_amount_usd after a payment processor API v3 migration returned empty strings for declined transactions. (2) The amount_usd column was removed in schema migration PR #3892, breaking reconciliation. (3) Settled-within-3-days check fails for 38% of records due to a processing delay from the migration.',
-    breachImpact: 'Finance reconciliation is completely blocked. The weekly Finance report cannot be generated. $2.1M in payment data is unaccountable. The Payments → Finance Reports SLA of 99.9% is in breach — currently at 61%. P0 incident declared.',
-    breachRecommendation: 'URGENT: (1) Deploy the hotfix for payment_amount_usd NULL handling in the ETL. (2) Restore the amount_usd column alias in fact_payments. (3) Reprocess the affected payment batch. Target: restore to >95% compliance within 4 hours.',
-    terms: [
-      { term: 'Amount reconciliation < 0.01%', status: 'fail', detail: '1,482,000 rows (39%) have NULL in payment_amount_usd — payment processor API v3 migration returned empty strings for declined transactions which were not cast correctly.' },
-      { term: 'No orphaned payment records', status: 'pass', detail: 'All payment records have matching order_ids' },
-      { term: 'currency_code in ISO 4217', status: 'pass', detail: 'All currency codes valid' },
-      { term: 'Fraud flag NOT NULL', status: 'fail', detail: '892,000 rows (23%) have NULL fraud_flag — the fraud scoring service was unavailable during the payment processor migration window and returned no scores.' },
-      { term: 'Settled within 3 business days', status: 'fail', detail: '1,444,000 rows (38%) are outside the 3-day settlement window — caused by the processing backlog from the migration outage.' },
-      { term: 'Duplicate payment_id check', status: 'pass', detail: 'No duplicate payment IDs' },
-    ],
-  },
-  {
-    id: 'ct4', name: 'Inventory → Supply Chain API',
-    producer: 'fact_inventory', consumer: 'SCM API v2',
-    owner: 'Rajan S.', status: 'active', compliance: 91,
-    checks: 5, failures: 1, created: '2026-03-10',
-    connection: 'SF_Codex', sla: '98%', lastChecked: '2026-05-05 16:00', trend: '↓ -7% vs last week',
-    description: 'Inventory snapshot must be refreshed every 6 hours with positive stock quantities.',
-    breachReason: 'One check is failing — the stock_qty >= 0 check has 94 records with NULL SKU values introduced by warehouse mobile app entries without barcode scans.',
-    breachImpact: 'Compliance is at 91%, below the 98% SLA. 94 inventory records cannot be matched to the product catalog, creating blind spots in the SCM API reorder logic.',
-    breachRecommendation: 'Manually reconcile the 94 NULL-SKU records. Add mandatory SKU scan validation to the warehouse mobile app. Resolve within 48h to restore SLA compliance.',
-    terms: [
-      { term: 'Freshness < 6h', status: 'pass', detail: 'Last snapshot 45 minutes ago' },
-      { term: 'stock_qty >= 0', status: 'pass', detail: '0 negative stock quantities' },
-      { term: 'warehouse_id NOT NULL', status: 'pass', detail: '100% of records have warehouse_id' },
-      { term: 'SKU matches product catalog', status: 'fail', detail: '94 records (0.01%) have NULL SKU — operators skipped barcode scan on warehouse mobile app. Cannot join to dim_products.' },
-      { term: 'snapshot_ts within expected window', status: 'pass', detail: 'All snapshot timestamps within the expected 6h window' },
-    ],
-  },
-  {
-    id: 'ct5', name: 'Web Sessions → Attribution',
-    producer: 'web_sessions', consumer: 'attribution_model',
-    owner: 'Priya M.', status: 'active', compliance: 96,
-    checks: 7, failures: 0, created: '2026-04-01',
-    connection: 'SF_Codex', sla: '97%', lastChecked: '2026-05-05 17:00', trend: '↑ +1% vs last week',
-    description: 'Session data piped to attribution model must have valid UTMs and user IDs.',
-    terms: [
-      { term: 'utm_source NOT NULL for paid sessions', status: 'pass', detail: '99.2% of paid sessions have utm_source — 0.8% are known direct-type sessions exempted by contract' },
-      { term: 'session_id unique', status: 'pass', detail: 'No duplicate session IDs across 9.5M sessions' },
-      { term: 'user_id hashed (SHA-256)', status: 'pass', detail: '100% of user_ids are valid SHA-256 hashes' },
-      { term: 'No sessions > 24h duration', status: 'pass', detail: '2% of sessions flagged as long — within the 5% warning threshold' },
-      { term: 'session_start ≤ session_end', status: 'pass', detail: 'No inverted session timestamps' },
-      { term: 'channel in allowed set', status: 'pass', detail: 'All channel values valid' },
-      { term: 'Freshness < 2h', status: 'pass', detail: 'Last update 38 minutes ago' },
-    ],
-  },
-]
-
-const complianceColor = (c: number) => c >= 90 ? '#16a34a' : c >= 75 ? '#ca8a04' : '#dc2626'
-const stCfg: Record<ContractStatus, { bg: string; color: string; border: string }> = {
-  active:  { bg: '#f0fdf4', color: '#16a34a', border: '#bbf7d0' },
-  warning: { bg: '#fef3c7', color: '#d97706', border: '#fde68a' },
-  breached:{ bg: '#fee2e2', color: '#dc2626', border: '#fca5a5' },
+function ownerFor(name: string) {
+  const u = name.toUpperCase()
+  if (u.includes('CUSTOMER') || u.includes('SALE')) return 'Sales Ops'
+  if (u.includes('SUPPLIER') || u.includes('PURCHASE') || u.includes('SHIPMENT') || u.includes('CARRIER')) return 'Supply Chain'
+  if (u.includes('PRODUCT') || u.includes('CATEGORY')) return 'Catalog Team'
+  if (u.includes('INVENTORY') || u.includes('WAREHOUSE')) return 'Operations'
+  return 'Data Platform'
 }
-const termIcon = { pass: '✅', fail: '❌', warn: '⚠️' }
-const termColor = { pass: '#16a34a', fail: '#dc2626', warn: '#d97706' }
-const termBg   = { pass: '#f0fdf4', fail: '#fff1f2', warn: '#fffbeb' }
+
+const consumersFor = (name: string) => {
+  const u = name.toUpperCase()
+  const base = ['Analytics BI']
+  if (u.includes('ORDER') || u.includes('SALE')) base.push('Revenue Dashboard', 'Finance Close')
+  if (u.includes('INVENTORY')) base.push('Replenishment Model')
+  if (u.includes('CUSTOMER')) base.push('CRM Sync', 'Marketing CDP')
+  if (u.includes('SHIPMENT')) base.push('Logistics Tracker')
+  if (u.includes('SUPPLIER')) base.push('Vendor Scorecard')
+  return base
+}
 
 export default function ContractsPage() {
-  const [filter, setFilter]     = useState<FilterType>('all')
-  const [expanded, setExpanded] = useState<string | null>(null)
-  const [search, setSearch]     = useState('')
+  const [connections, setConnections] = useState<ConnectionListItem[]>([])
+  const [selectedId, setSelectedId]   = useState('')
+  const [contracts, setContracts]     = useState<Contract[]>([])
+  const [conn, setConn]               = useState<SfConn | null>(null)
+  const [loading, setLoading]         = useState(true)
+  const [refreshing, setRefreshing]   = useState(false)
+  const [error, setError]             = useState('')
+  const [filter, setFilter]           = useState<'all' | 'valid' | 'drift' | 'pending'>('all')
+  const [expanded, setExpanded]       = useState<string | null>(null)
 
-  const total   = contracts.length
-  const active  = contracts.filter(c => c.status === 'active').length
-  const breached = contracts.filter(c => c.status === 'breached').length
-  const avgComp = Math.round(contracts.reduce((s, c) => s + c.compliance, 0) / contracts.length)
+  useEffect(() => {
+    fetch('/api/connections').then(r => r.json()).then((all: ConnectionListItem[]) => {
+      const sf = all.filter(c => c.type === 'snowflake')
+      setConnections(sf)
+      setSelectedId(sf.find(c => c.status === 'active')?.id ?? sf[0]?.id ?? '')
+    }).catch(e => setError((e as Error).message))
+  }, [])
 
-  const filtered = contracts.filter(c => {
-    const matchFilter =
-      filter === 'all'     ? true :
-      filter === 'active'  ? c.status === 'active' || c.status === 'warning' :
-      filter === 'breached'? c.status === 'breached' : true
-    const matchSearch = search === '' ||
-      c.name.toLowerCase().includes(search.toLowerCase()) ||
-      c.producer.toLowerCase().includes(search.toLowerCase()) ||
-      c.consumer.toLowerCase().includes(search.toLowerCase())
-    return matchFilter && matchSearch
-  })
+  async function load(id: string, isRefresh = false) {
+    if (!id) { setLoading(false); return }
+    isRefresh ? setRefreshing(true) : setLoading(true)
+    setError('')
+    try {
+      const [schemaRes, connRes] = await Promise.all([
+        fetch(`/api/snowflake/schema?connectionId=${id}`, { cache: 'no-store' }),
+        fetch('/api/connections'),
+      ])
+      const { tables }: { tables: SchemaTable[] } = await schemaRes.json()
+      const all = await connRes.json() as Array<ConnectionListItem & { warehouse?: string; schema?: string; database?: string }>
+      const me = all.find(c => c.id === id)
+      if (me) setConn({ id: me.id, name: me.name, warehouse: me.warehouse ?? '', schema: me.schema ?? '', database: me.database ?? '', type: me.type, status: me.status })
+      setContracts(tables.map((t, i) => {
+        const nullable = t.columns.filter(c => c.nullable === 'YES').length
+        const status: Contract['status'] = t.columns.length === 0 ? 'pending' : nullable / Math.max(t.columns.length, 1) > 0.6 ? 'drift' : 'valid'
+        return {
+          id: `CTR-${String(i + 1).padStart(4, '0')}`,
+          name: `${t.name}_contract_v1`,
+          table: t.name, status, version: 'v1.0.0',
+          consumers: consumersFor(t.name),
+          columns: t.columns,
+          rowCount: t.rows,
+        }
+      }))
+    } catch (e) {
+      setError((e as Error).message); setContracts([])
+    } finally { setLoading(false); setRefreshing(false) }
+  }
 
-  const statCards = [
-    { key: 'all'      as FilterType, label: 'Total Contracts', value: total,   icon: '📄', color: '#2563eb',  activeBg: '#2563eb'  },
-    { key: 'active'   as FilterType, label: 'Active',          value: active,  icon: '✅', color: '#16a34a',  activeBg: '#16a34a'  },
-    { key: 'breached' as FilterType, label: 'Breached',        value: breached,icon: '🚨', color: '#dc2626',  activeBg: '#dc2626'  },
-    { key: 'all'      as FilterType, label: 'Avg Compliance',  value: avgComp + '%', icon: '📊', color: complianceColor(avgComp), activeBg: '#475569' },
-  ]
+  useEffect(() => { if (selectedId) load(selectedId) /* eslint-disable-line react-hooks/exhaustive-deps */ }, [selectedId])
+
+  const filtered = contracts.filter(c => filter === 'all' || c.status === filter)
+  const counts = {
+    total: contracts.length,
+    valid: contracts.filter(c => c.status === 'valid').length,
+    drift: contracts.filter(c => c.status === 'drift').length,
+    pending: contracts.filter(c => c.status === 'pending').length,
+  }
 
   return (
     <div style={{ padding: '28px 36px', maxWidth: '1300px' }}>
-      <div style={{ fontSize: '12.5px', color: '#94a3b8', marginBottom: '8px' }}>
-        Workspace · <span style={{ color: '#475569' }}>Analytics platform</span>
-      </div>
+      <div style={{ fontSize: '12.5px', color: '#94a3b8', marginBottom: '8px' }}>Workspace · <span style={{ color: '#475569' }}>Analytics platform</span></div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', gap: '12px' }}>
         <div>
           <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#1a1a1a', margin: 0 }}>Data Contracts</h1>
-          <p style={{ color: '#64748b', fontSize: '13px', margin: '4px 0 0' }}>
-            Agreements between data producers and consumers
-            {breached > 0 && <span style={{ color: '#dc2626', fontWeight: 600 }}> — {breached} breach{breached > 1 ? 'es' : ''} active</span>}
-          </p>
+          <p style={{ color: '#64748b', fontSize: '13px', margin: '4px 0 0' }}>One contract per live table — {contracts.length} contracts derived from {conn?.schema ?? ''}</p>
         </div>
-        <button style={{ background: '#dbeafe', border: '1px solid #93c5fd', padding: '8px 16px', borderRadius: '8px', fontSize: '13px', fontWeight: 600, color: '#2563eb', cursor: 'pointer' }}>
-          + New Contract
-        </button>
+        <ConnectionToolbar selectedId={selectedId} onChange={setSelectedId} onRefresh={() => load(selectedId, true)} refreshing={refreshing} connections={connections} />
       </div>
 
-      {/* Clickable stat cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '24px' }}>
-        {statCards.map((card, idx) => {
-          const isActive = filter === card.key && !(idx === 0 || idx === 3)
+      <ConnectionBanner conn={conn} />
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '18px' }}>
+        {[
+          { k: 'all',     label: 'Total Contracts', val: counts.total,   color: '#475569', bg: '#f8fafc' },
+          { k: 'valid',   label: 'Valid',           val: counts.valid,   color: '#16a34a', bg: '#f0fdf4' },
+          { k: 'drift',   label: 'Drift Detected',  val: counts.drift,   color: '#d97706', bg: '#fffbeb' },
+          { k: 'pending', label: 'Pending',         val: counts.pending, color: '#0284c7', bg: '#f0f9ff' },
+        ].map(s => {
+          const active = filter === s.k
           return (
-            <div key={idx} onClick={() => idx === 0 || idx === 3 ? setFilter('all') : setFilter(isActive ? 'all' : card.key)}
-              style={{
-                background: isActive ? card.activeBg : '#fff',
-                border: `2px solid ${isActive ? card.activeBg : '#ebe8df'}`,
-                borderRadius: '12px', padding: '16px 20px',
-                cursor: idx === 0 || idx === 3 ? 'default' : 'pointer',
-                boxShadow: isActive ? `0 4px 16px ${card.activeBg}40` : 'none',
-                transition: 'all 0.18s',
-              }}>
-              <div style={{ fontSize: '22px', marginBottom: '6px' }}>{card.icon}</div>
-              <div style={{ fontSize: '26px', fontWeight: 700, color: isActive ? '#fff' : card.color }}>{card.value}</div>
-              <div style={{ fontSize: '12px', color: isActive ? 'rgba(255,255,255,0.8)' : '#64748b', marginTop: '2px' }}>{card.label}</div>
-              {isActive && <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.65)', marginTop: '3px' }}>Click to clear</div>}
-            </div>
+            <button key={s.k} onClick={() => setFilter(active ? 'all' : s.k as 'all' | 'valid' | 'drift' | 'pending')} style={{
+              background: active ? s.color : s.bg, border: `2px solid ${active ? s.color : 'transparent'}`,
+              borderRadius: '12px', padding: '14px 18px', cursor: 'pointer', textAlign: 'left',
+              boxShadow: active ? `0 4px 14px ${s.color}40` : '0 1px 3px rgba(0,0,0,0.04)',
+            }}>
+              <div style={{ fontSize: '11px', color: active ? 'rgba(255,255,255,0.85)' : '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>{s.label}</div>
+              <div style={{ fontSize: '26px', fontWeight: 800, color: active ? '#fff' : s.color, marginTop: '4px' }}>{loading ? '—' : s.val}</div>
+            </button>
           )
         })}
       </div>
 
-      {/* Search */}
-      <input value={search} onChange={e => setSearch(e.target.value)}
-        placeholder="Search contracts by name, producer, or consumer…"
-        style={{ width: '100%', padding: '9px 14px', borderRadius: '9px', border: '1px solid #e2e8f0', fontSize: '13px', background: '#fafaf9', color: '#0f172a', marginBottom: '16px', boxSizing: 'border-box', outline: 'none' }} />
+      {loading && <div style={{ textAlign: 'center', padding: '40px', color: '#94a3b8' }}>❄️ Generating contracts from schema…</div>}
+      {error && <div style={{ background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: '10px', padding: '20px', color: '#dc2626' }}>{error}</div>}
 
-      {/* Filter label */}
-      {filter !== 'all' && (
-        <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '12.5px', color: '#64748b' }}>Showing:</span>
-          <span style={{ background: '#f1f5f9', color: '#334155', padding: '3px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: 600 }}>{filter}</span>
-          <span style={{ fontSize: '12px', color: '#94a3b8' }}>{filtered.length} result{filtered.length !== 1 ? 's' : ''}</span>
-          <button onClick={() => setFilter('all')} style={{ background: 'none', border: 'none', color: '#6366f1', fontSize: '12px', cursor: 'pointer', fontWeight: 500 }}>✕ Clear</button>
+      {!loading && !error && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {filtered.map(c => {
+            const sevColor = c.status === 'valid' ? '#16a34a' : c.status === 'drift' ? '#d97706' : '#0284c7'
+            const sevBg    = c.status === 'valid' ? '#dcfce7' : c.status === 'drift' ? '#fef3c7' : '#dbeafe'
+            const isExpanded = expanded === c.id
+            return (
+              <div key={c.id} style={{ background: '#fff', border: `1.5px solid ${isExpanded ? '#6366f1' : '#ebe8df'}`, borderRadius: '12px', overflow: 'hidden', boxShadow: isExpanded ? '0 0 0 3px rgba(99,102,241,0.1)' : 'none' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '14px 18px', cursor: 'pointer' }} onClick={() => setExpanded(isExpanded ? null : c.id)}>
+                  <div style={{ width: '4px', alignSelf: 'stretch', background: sevColor, borderRadius: '2px' }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '4px' }}>
+                      <span style={{ fontWeight: 700, fontSize: '14px', color: '#1a1a1a' }}>{c.name}</span>
+                      <span style={{ background: sevBg, color: sevColor, fontSize: '10.5px', fontWeight: 700, padding: '2px 8px', borderRadius: '20px', textTransform: 'uppercase' }}>{c.status}</span>
+                      <span style={{ background: '#f1f5f9', color: '#475569', fontSize: '10.5px', fontWeight: 600, padding: '2px 8px', borderRadius: '20px', fontFamily: 'monospace' }}>{c.version}</span>
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: '#94a3b8', fontFamily: 'monospace' }}>{conn?.schema}.{c.table} · {c.columns.length} columns · {c.rowCount.toLocaleString()} rows</div>
+                  </div>
+                  {/* Owner block — prominent */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 12px', background: '#fafaf9', border: '1px solid #ebe8df', borderRadius: '8px', minWidth: '180px' }}>
+                    <div style={{ width: '30px', height: '30px', borderRadius: '50%', background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '11px', fontWeight: 700, flexShrink: 0 }}>
+                      {ownerFor(c.table).split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.04em' }}>OWNER</div>
+                      <div style={{ fontSize: '12px', fontWeight: 600, color: '#1a1a1a' }}>{ownerFor(c.table)}</div>
+                    </div>
+                  </div>
+                  <span style={{ color: '#94a3b8' }}>{isExpanded ? '▲' : '▼'}</span>
+                </div>
+                {isExpanded && (
+                  <div style={{ borderTop: '1px solid #f1f5f9', padding: '14px 18px', background: '#fafaf9' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
+                      <div style={{ background: '#fff', borderRadius: '8px', padding: '10px 12px' }}>
+                        <div style={{ fontSize: '10.5px', color: '#94a3b8', fontWeight: 700, marginBottom: '4px' }}>OWNER</div>
+                        <div style={{ fontSize: '13px', fontWeight: 600, color: '#1a1a1a' }}>{ownerFor(c.table)}</div>
+                      </div>
+                      <div style={{ background: '#fff', borderRadius: '8px', padding: '10px 12px' }}>
+                        <div style={{ fontSize: '10.5px', color: '#94a3b8', fontWeight: 700, marginBottom: '4px' }}>CONSUMERS</div>
+                        <div style={{ fontSize: '12px', color: '#475569' }}>{c.consumers.join(', ')}</div>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#475569', fontWeight: 700, marginBottom: '6px' }}>SCHEMA SPEC ({c.columns.length} columns)</div>
+                    <div style={{ maxHeight: '300px', overflowY: 'auto', background: '#fff', borderRadius: '8px', border: '1px solid #ebe8df' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                        <thead>
+                          <tr style={{ background: '#f8fafc' }}>
+                            {['#', 'Column', 'Type', 'Nullable'].map(h =>
+                              <th key={h} style={{ textAlign: 'left', padding: '6px 10px', fontSize: '10.5px', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>{h}</th>
+                            )}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {c.columns.sort((a, b) => a.position - b.position).map(col => (
+                            <tr key={col.name} style={{ borderTop: '1px solid #f3f1ea' }}>
+                              <td style={{ padding: '6px 10px', color: '#94a3b8' }}>{col.position}</td>
+                              <td style={{ padding: '6px 10px', fontFamily: 'monospace', fontWeight: 500 }}>{col.name}</td>
+                              <td style={{ padding: '6px 10px' }}>
+                                <span style={{ background: '#f1f5f9', padding: '1px 8px', borderRadius: '20px', fontSize: '11px', fontFamily: 'monospace', fontWeight: 600 }}>{col.type}</span>
+                              </td>
+                              <td style={{ padding: '6px 10px', color: col.nullable === 'YES' ? '#94a3b8' : '#16a34a', fontSize: '11.5px', fontWeight: 500 }}>{col.nullable === 'YES' ? '○ Nullable' : '✓ Not Null'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       )}
-
-      {/* Contract cards */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        {filtered.map(c => {
-          const ss = stCfg[c.status]
-          const cc = complianceColor(c.compliance)
-          const isOpen = expanded === c.id
-          const failedTerms = c.terms.filter(t => t.status === 'fail')
-          const warnTerms   = c.terms.filter(t => t.status === 'warn')
-
-          return (
-            <div key={c.id} style={{
-              background: '#fff',
-              border: `1.5px solid ${isOpen ? '#6366f1' : c.status === 'breached' ? '#fca5a5' : c.status === 'warning' ? '#fde68a' : '#ebe8df'}`,
-              borderRadius: '14px', overflow: 'hidden',
-              boxShadow: isOpen ? '0 6px 24px rgba(99,102,241,0.13)' : c.status === 'breached' ? '0 2px 8px rgba(220,38,38,0.08)' : '0 1px 3px rgba(0,0,0,0.04)',
-              transition: 'all 0.2s',
-            }}>
-
-              {/* Summary row */}
-              <div onClick={() => setExpanded(isOpen ? null : c.id)}
-                style={{ padding: '18px 22px', cursor: 'pointer', userSelect: 'none' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '20px' }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-                      <span style={{ fontWeight: 700, fontSize: '14px', color: '#1a1a1a' }}>{c.name}</span>
-                      <span style={{ ...ss, padding: '2px 9px', borderRadius: '20px', fontSize: '11px', fontWeight: 700 }}>{c.status}</span>
-                      {failedTerms.length > 0 && (
-                        <span style={{ background: '#fee2e2', color: '#dc2626', padding: '2px 9px', borderRadius: '20px', fontSize: '11px', fontWeight: 700 }}>
-                          {failedTerms.length} check{failedTerms.length > 1 ? 's' : ''} failing
-                        </span>
-                      )}
-                      {warnTerms.length > 0 && (
-                        <span style={{ background: '#fef3c7', color: '#d97706', padding: '2px 9px', borderRadius: '20px', fontSize: '11px', fontWeight: 700 }}>
-                          {warnTerms.length} warning{warnTerms.length > 1 ? 's' : ''}
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ fontSize: '12.5px', color: '#64748b', marginBottom: '8px' }}>{c.description}</div>
-                    <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: '#94a3b8', flexWrap: 'wrap' }}>
-                      <span>Producer: <strong style={{ color: '#475569' }}>{c.producer}</strong></span>
-                      <span>Consumer: <strong style={{ color: '#475569' }}>{c.consumer}</strong></span>
-                      <span>Owner: <strong style={{ color: '#475569' }}>{c.owner}</strong></span>
-                      <span>SLA: <strong style={{ color: cc }}>{c.sla}</strong></span>
-                      <span style={{ color: c.trend.startsWith('↑') ? '#16a34a' : '#dc2626' }}>{c.trend}</span>
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexShrink: 0 }}>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '30px', fontWeight: 800, color: cc, lineHeight: 1 }}>{c.compliance}%</div>
-                      <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>compliance</div>
-                      <div style={{ fontSize: '11px', color: '#94a3b8' }}>{c.checks} checks · {c.failures} fail</div>
-                    </div>
-                    <div style={{
-                      width: '28px', height: '28px', borderRadius: '8px',
-                      background: isOpen ? '#6366f1' : '#f1f5f9',
-                      color: isOpen ? '#fff' : '#64748b',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: '12px', transition: 'all 0.18s',
-                    }}>
-                      {isOpen ? '▲' : '▼'}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Compliance bar */}
-                <div style={{ marginTop: '12px', height: '5px', background: '#f1f5f9', borderRadius: '4px', overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${c.compliance}%`, background: cc, borderRadius: '4px', transition: 'width 0.5s' }} />
-                </div>
-              </div>
-
-              {/* Expanded detail */}
-              {isOpen && (
-                <div style={{ borderTop: '2px solid #f1f5f9', background: '#f8fafd' }}>
-
-                  {/* Metadata bar */}
-                  <div style={{ display: 'flex', background: '#fff', borderBottom: '1px solid #f1f5f9' }}>
-                    {[
-                      { label: 'Connection',   value: c.connection },
-                      { label: 'SLA Target',   value: c.sla },
-                      { label: 'Created',      value: c.created },
-                      { label: 'Last Checked', value: c.lastChecked },
-                      { label: 'Trend',        value: c.trend },
-                    ].map((m, i) => (
-                      <div key={i} style={{ flex: 1, padding: '10px 16px', borderRight: i < 4 ? '1px solid #f1f5f9' : 'none' }}>
-                        <div style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '3px' }}>{m.label}</div>
-                        <div style={{ fontSize: '12.5px', fontWeight: 600, color: m.label === 'Trend' ? (m.value.startsWith('↑') ? '#16a34a' : '#dc2626') : '#334155' }}>{m.value}</div>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-
-                    {/* Breach explanation (only if breached or warning) */}
-                    {(c.status === 'breached' || c.status === 'warning') && c.breachReason && (
-                      <>
-                        <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #fca5a5', overflow: 'hidden' }}>
-                          <div style={{ background: '#fee2e2', padding: '10px 16px', borderBottom: '1px solid #fca5a5', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span style={{ fontSize: '16px' }}>🚨</span>
-                            <span style={{ fontSize: '12px', fontWeight: 800, color: '#dc2626', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-                              {c.status === 'breached' ? 'Breach Reason — Why is this contract failing?' : 'Warning — What is at risk?'}
-                            </span>
-                          </div>
-                          <div style={{ padding: '14px 16px', fontSize: '13px', color: '#1e293b', lineHeight: '1.7' }}>{c.breachReason}</div>
-                        </div>
-
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
-                          <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #fdba74', overflow: 'hidden' }}>
-                            <div style={{ background: '#fff7ed', padding: '10px 16px', borderBottom: '1px solid #fdba74', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <span style={{ fontSize: '16px' }}>💥</span>
-                              <span style={{ fontSize: '12px', fontWeight: 800, color: '#ea580c', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Business Impact</span>
-                            </div>
-                            <div style={{ padding: '14px 16px', fontSize: '13px', color: '#1e293b', lineHeight: '1.7' }}>{c.breachImpact}</div>
-                          </div>
-                          <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #bbf7d0', overflow: 'hidden' }}>
-                            <div style={{ background: '#f0fdf4', padding: '10px 16px', borderBottom: '1px solid #bbf7d0', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <span style={{ fontSize: '16px' }}>✅</span>
-                              <span style={{ fontSize: '12px', fontWeight: 800, color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Recommended Fix</span>
-                            </div>
-                            <div style={{ padding: '14px 16px', fontSize: '13px', color: '#1e293b', lineHeight: '1.7' }}>{c.breachRecommendation}</div>
-                          </div>
-                        </div>
-                      </>
-                    )}
-
-                    {/* Contract Terms checklist */}
-                    <div style={{ background: '#fff', borderRadius: '12px', border: '1px solid #e9eef5', overflow: 'hidden' }}>
-                      <div style={{ padding: '12px 16px', background: '#fafaf9', borderBottom: '1px solid #e9eef5', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '16px' }}>📋</span>
-                        <span style={{ fontSize: '12px', fontWeight: 800, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Contract Terms — Check-by-Check Results</span>
-                        <span style={{ marginLeft: 'auto', fontSize: '11.5px', color: '#94a3b8' }}>
-                          {c.terms.filter(t => t.status === 'pass').length}/{c.terms.length} passing
-                        </span>
-                      </div>
-                      <div style={{ padding: '8px 0' }}>
-                        {c.terms.map((t, i) => (
-                          <div key={i} style={{
-                            padding: '10px 16px',
-                            background: t.status !== 'pass' ? termBg[t.status] : 'transparent',
-                            borderLeft: `3px solid ${t.status !== 'pass' ? termColor[t.status] : 'transparent'}`,
-                            marginLeft: t.status !== 'pass' ? '0' : '3px',
-                            borderBottom: i < c.terms.length - 1 ? '1px solid #f3f1ea' : 'none',
-                          }}>
-                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
-                              <span style={{ fontSize: '14px', flexShrink: 0, marginTop: '1px' }}>{termIcon[t.status]}</span>
-                              <div style={{ flex: 1 }}>
-                                <div style={{ fontSize: '12.5px', fontWeight: 700, color: '#1e293b', marginBottom: '2px' }}>{t.term}</div>
-                                <div style={{ fontSize: '12px', color: t.status !== 'pass' ? termColor[t.status] : '#64748b', lineHeight: '1.5' }}>{t.detail}</div>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Collapse */}
-                    <div>
-                      <button onClick={() => setExpanded(null)} style={{ padding: '7px 14px', borderRadius: '8px', border: '1.5px solid #e2e8f0', background: '#fff', color: '#64748b', fontSize: '12px', cursor: 'pointer' }}>
-                        ▲ Collapse
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )
-        })}
-
-        {filtered.length === 0 && (
-          <div style={{ padding: '60px', textAlign: 'center', color: '#94a3b8', background: '#fff', borderRadius: '14px', border: '2px dashed #e2e8f0' }}>
-            No contracts match your filters
-          </div>
-        )}
-      </div>
     </div>
   )
 }

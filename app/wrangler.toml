@@ -1,0 +1,144 @@
+# ─── Cloudflare Workers configuration for DataGuard ──────────────────────
+#
+# Deploy: `npm run deploy`        (preview env: dataguard-preview)
+#         `npm run deploy:prod`    (production env: dataguard)
+#
+# Note on env blocks:
+#   Wrangler's `[env.X]` sections do NOT inherit `vars` / `kv_namespaces`
+#   from the top level. Each env that needs them must redeclare them.
+#   That's why every binding appears under [env.production] and [env.preview].
+# ──────────────────────────────────────────────────────────────────────────
+
+name                 = "dataguard"
+main                 = ".open-next/worker.js"
+compatibility_date   = "2026-05-01"
+compatibility_flags  = ["nodejs_compat"]
+
+[assets]
+directory  = ".open-next/assets"
+binding    = "ASSETS"
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[triggers]
+crons = ["0 */1 * * *"]   # every hour — for /api/cron/quality-check (optional)
+
+# ──────────────────────────────────────────────────────────────────────────
+# Production environment
+# ──────────────────────────────────────────────────────────────────────────
+[env.production]
+name                 = "dataguard"
+compatibility_date   = "2026-05-01"
+compatibility_flags  = ["nodejs_compat"]
+main                 = ".open-next/worker.js"
+
+[env.production.assets]
+directory  = ".open-next/assets"
+binding    = "ASSETS"
+
+[env.production.vars]
+APP_NAME         = "DataGuard"
+DEFAULT_TIMEZONE = "Asia/Kolkata"
+
+[[env.production.kv_namespaces]]
+binding    = "CONNECTIONS_KV"
+id         = "4c8b37bb1af94fab9d6d5ec67c64c166"
+preview_id = "ed4f21c77d134ec899414f84a32f77af"
+
+[[env.production.kv_namespaces]]
+binding    = "RULES_KV"
+id         = "13193eea052043dcbc65d4520ad55c07"
+preview_id = "84218efe7f9b490c8ca24a7ecc3f54de"
+
+[[env.production.kv_namespaces]]
+binding    = "REPORTS_KV"
+id         = "95a7c083bb314380a25cfae26ef2566a"
+preview_id = "377a16d68baa437cb8aede8c67fc328c"
+
+[[env.production.kv_namespaces]]
+binding    = "ALERTS_KV"
+id         = "d93a0e714d564785b1cc61e5e569c57b"
+preview_id = "6bb09dd46df44387afb9635196fb454e"
+
+[[env.production.kv_namespaces]]
+binding    = "SESSION_KV"
+id         = "343c7edea68846dc9961dade766f2df6"
+preview_id = "5a56313aaa624d68bf58d4b50745b938"
+
+[env.production.observability]
+enabled = true
+head_sampling_rate = 1
+
+[env.production.triggers]
+crons = ["0 */1 * * *"]
+
+# ──────────────────────────────────────────────────────────────────────────
+# Preview environment (used by `npm run deploy`)
+# ──────────────────────────────────────────────────────────────────────────
+[env.preview]
+name                 = "dataguard-preview"
+compatibility_date   = "2026-05-01"
+compatibility_flags  = ["nodejs_compat"]
+main                 = ".open-next/worker.js"
+
+[env.preview.assets]
+directory  = ".open-next/assets"
+binding    = "ASSETS"
+
+[env.preview.vars]
+APP_NAME         = "DataGuard"
+DEFAULT_TIMEZONE = "Asia/Kolkata"
+
+[[env.preview.kv_namespaces]]
+binding    = "CONNECTIONS_KV"
+id         = "ed4f21c77d134ec899414f84a32f77af"   # preview namespace as primary
+
+[[env.preview.kv_namespaces]]
+binding    = "RULES_KV"
+id         = "84218efe7f9b490c8ca24a7ecc3f54de"
+
+[[env.preview.kv_namespaces]]
+binding    = "REPORTS_KV"
+id         = "377a16d68baa437cb8aede8c67fc328c"
+
+[[env.preview.kv_namespaces]]
+binding    = "ALERTS_KV"
+id         = "6bb09dd46df44387afb9635196fb454e"
+
+[[env.preview.kv_namespaces]]
+binding    = "SESSION_KV"
+id         = "5a56313aaa624d68bf58d4b50745b938"
+
+# ──────────────────────────────────────────────────────────────────────────
+# Top-level (no-env) bindings — used by `wrangler dev` for local development
+# ──────────────────────────────────────────────────────────────────────────
+[vars]
+APP_NAME         = "DataGuard"
+DEFAULT_TIMEZONE = "Asia/Kolkata"
+
+[[kv_namespaces]]
+binding    = "CONNECTIONS_KV"
+id         = "4c8b37bb1af94fab9d6d5ec67c64c166"
+preview_id = "ed4f21c77d134ec899414f84a32f77af"
+
+[[kv_namespaces]]
+binding    = "RULES_KV"
+id         = "13193eea052043dcbc65d4520ad55c07"
+preview_id = "84218efe7f9b490c8ca24a7ecc3f54de"
+
+[[kv_namespaces]]
+binding    = "REPORTS_KV"
+id         = "95a7c083bb314380a25cfae26ef2566a"
+preview_id = "377a16d68baa437cb8aede8c67fc328c"
+
+[[kv_namespaces]]
+binding    = "ALERTS_KV"
+id         = "d93a0e714d564785b1cc61e5e569c57b"
+preview_id = "6bb09dd46df44387afb9635196fb454e"
+
+[[kv_namespaces]]
+binding    = "SESSION_KV"
+id         = "343c7edea68846dc9961dade766f2df6"
+preview_id = "5a56313aaa624d68bf58d4b50745b938"

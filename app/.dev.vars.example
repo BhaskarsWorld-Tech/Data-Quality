@@ -1,0 +1,12 @@
+# Local development secrets for `wrangler dev`.
+# Copy to `.dev.vars` (gitignored) and fill in real values.
+# These mirror the Workers secrets you set via `wrangler secret put NAME`.
+
+ANTHROPIC_API_KEY=sk-ant-api03-xxxxxxxxxxxxxxxxxxxxxxxxx
+
+# Optional alert channels — leave blank if not used.
+SLACK_WEBHOOK=
+TEAMS_WEBHOOK=
+WEBEX_WEBHOOK=
+PAGERDUTY_ROUTING_KEY=
+SENDGRID_API_KEY=

@@ -1,7 +1,7 @@
 import { store } from '@/lib/store'
 import ConnectionsClient from '@/components/connections/ConnectionsClient'
 
-export default function ConnectionsPage() {
-  const connections = store.connections.getAll()
+export default async function ConnectionsPage() {
+  const connections = await store.connections.getAll()
   return <ConnectionsClient initialConnections={connections} />
 }

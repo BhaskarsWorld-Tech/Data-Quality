@@ -1,8 +1,9 @@
 'use client'
-import { useState } from 'react'
-import { Report } from '@/lib/types'
+import React, { useState, useEffect } from 'react'
+import { Report, Rule, Connection, CheckResult } from '@/lib/types'
 import { formatDateTime, formatNumber } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
+import { buildRuleSql, ruleMechanics, RULE_TYPE_LABEL } from '@/lib/ruleSql'
 
 const statusConfig = {
   passed:  { bg: '#dcfce7', color: '#16a34a', label: '✓ Passed',  dot: '#16a34a' },
@@ -40,6 +41,19 @@ export default function ReportsClient({ initialReports }: { initialReports: Repo
   const [selected, setSelected] = useState<Report | null>(reports[0] || null)
   const [running, setRunning] = useState(false)
   const [showModal, setShowModal] = useState(false)
+  const [expandedRow, setExpandedRow] = useState<string | null>(null)
+  const [rules, setRules]             = useState<Rule[]>([])
+  const [connections, setConnections] = useState<Connection[]>([])
+  const [statusFilter, setStatusFilter] = useState<'all' | 'passed' | 'failed' | 'warning'>('all')
+
+  // Pull the full rules + connections lists so we can render SQL + mechanics
+  // for each row in the selected report.
+  useEffect(() => {
+    fetch('/api/rules').then(r => r.json()).then(setRules).catch(() => {})
+    fetch('/api/connections').then(r => r.json()).then(setConnections).catch(() => {})
+  }, [])
+  // Reset row expansion + status filter when switching reports
+  useEffect(() => { setExpandedRow(null); setStatusFilter('all') }, [selected?.id])
   const [form, setForm] = useState({
     name: '', type: 'quality', format: 'web',
     domain: 'All Domains', dataset: 'All Datasets',
@@ -129,6 +143,25 @@ export default function ReportsClient({ initialReports }: { initialReports: Repo
               <div>
                 <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#0f172a', margin: '0 0 4px' }}>{selected.name}</h2>
                 <div style={{ fontSize: '13px', color: '#64748b' }}>Executed {formatDateTime(selected.executedAt)}</div>
+                {(selected.type || selected.domain || selected.dataset) && (
+                  <div style={{ display: 'flex', gap: '6px', marginTop: '8px', flexWrap: 'wrap' }}>
+                    {selected.type && selected.type !== 'quality' && (
+                      <span style={{ background: '#eef2ff', color: '#6366f1', padding: '2px 9px', borderRadius: '20px', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        {selected.type}
+                      </span>
+                    )}
+                    {selected.domain && selected.domain !== 'All Domains' && (
+                      <span style={{ background: '#f0fdf4', color: '#16a34a', padding: '2px 9px', borderRadius: '20px', fontSize: '11px', fontWeight: 600 }}>
+                        🏷 {selected.domain}
+                      </span>
+                    )}
+                    {selected.dataset && selected.dataset !== 'All Datasets' && (
+                      <span style={{ background: '#fef3c7', color: '#ca8a04', padding: '2px 9px', borderRadius: '20px', fontSize: '11px', fontWeight: 600, fontFamily: 'monospace' }}>
+                        📊 {selected.dataset}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div style={{ fontSize: '40px', fontWeight: 800, color: scoreColor(selected.overallScore), lineHeight: 1 }}>{selected.overallScore}%</div>
@@ -137,12 +170,32 @@ export default function ReportsClient({ initialReports }: { initialReports: Repo
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '12px', marginBottom: '24px' }}>
-              {[{ label: 'Total Checks', value: selected.totalChecks, bg: '#f8fafc', color: '#0f172a' }, { label: 'Passed', value: selected.passed, bg: '#dcfce7', color: '#16a34a' }, { label: 'Failed', value: selected.failed, bg: '#fee2e2', color: '#dc2626' }, { label: 'Warnings', value: selected.warnings, bg: '#fef9c3', color: '#ca8a04' }].map(card => (
-                <div key={card.label} style={{ background: card.bg, borderRadius: '12px', padding: '14px', textAlign: 'center' }}>
-                  <div style={{ fontSize: '26px', fontWeight: 800, color: card.color }}>{card.value}</div>
-                  <div style={{ fontSize: '11px', color: '#64748b', fontWeight: 500 }}>{card.label}</div>
-                </div>
-              ))}
+              {([
+                { key: 'all',     label: 'Total Checks', value: selected.totalChecks, bg: '#f8fafc', color: '#0f172a' },
+                { key: 'passed',  label: 'Passed',       value: selected.passed,      bg: '#dcfce7', color: '#16a34a' },
+                { key: 'failed',  label: 'Failed',       value: selected.failed,      bg: '#fee2e2', color: '#dc2626' },
+                { key: 'warning', label: 'Warnings',     value: selected.warnings,    bg: '#fef9c3', color: '#ca8a04' },
+              ] as const).map(card => {
+                const active = statusFilter === card.key
+                return (
+                  <button
+                    key={card.label}
+                    onClick={() => setStatusFilter(active ? 'all' : card.key)}
+                    title={active ? `Showing only ${card.label} · click to clear` : `Click to filter to ${card.label}`}
+                    style={{
+                      background: card.bg, borderRadius: '12px', padding: '14px',
+                      textAlign: 'center', cursor: 'pointer',
+                      border: active ? `2px solid ${card.color}` : '2px solid transparent',
+                      boxShadow: active ? `0 4px 14px ${card.color}40` : 'none',
+                      transition: 'all 0.15s',
+                    }}>
+                    <div style={{ fontSize: '26px', fontWeight: 800, color: card.color }}>{card.value}</div>
+                    <div style={{ fontSize: '11px', color: '#64748b', fontWeight: active ? 700 : 500 }}>
+                      {card.label}{active ? ' · ▼ filtered' : ''}
+                    </div>
+                  </button>
+                )
+              })}
             </div>
 
             {selected.trend && selected.trend.length > 1 && (() => {
@@ -195,41 +248,81 @@ export default function ReportsClient({ initialReports }: { initialReports: Repo
               )
             })()}
 
-            <div style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a', marginBottom: '12px' }}>Check Results</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <div style={{ fontSize: '13px', fontWeight: 600, color: '#0f172a' }}>
+                Check Results · {statusFilter === 'all'
+                  ? `${selected.results.length} rule${selected.results.length === 1 ? '' : 's'} executed`
+                  : `showing ${selected.results.filter(r => r.status === statusFilter).length} of ${selected.results.length}`}
+                {statusFilter !== 'all' && (
+                  <button onClick={() => setStatusFilter('all')}
+                    style={{ marginLeft: '10px', background: '#fff', border: '1px solid #e2e8f0', padding: '2px 9px', borderRadius: '20px', fontSize: '10.5px', color: '#475569', fontWeight: 500, cursor: 'pointer' }}>
+                    ✕ Clear filter
+                  </button>
+                )}
+              </div>
+              <div style={{ fontSize: '11px', color: '#94a3b8' }}>Click any row to see how the rule worked</div>
+            </div>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid #f1f5f9' }}>
-                  {['Rule', 'Table', 'Score', 'Records', 'Failed', 'Status', 'Duration'].map(h => (
+                  {['', 'Rule', 'Table', 'Score', 'Records', 'Failed', 'Status', 'Duration'].map(h => (
                     <th key={h} style={{ textAlign: 'left', padding: '8px 10px', color: '#64748b', fontWeight: 600, fontSize: '11px' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {selected.results.map((r, i) => {
-                  const s = statusConfig[r.status]
+                {selected.results
+                  .filter(r => statusFilter === 'all' || r.status === statusFilter)
+                  .map((r, i) => {
+                  const s          = statusConfig[r.status]
+                  const rowKey     = `${selected.id}-${r.ruleId}-${i}`
+                  const isExpanded = expandedRow === rowKey
+                  // Look up the canonical rule + connection so we can compute SQL.
+                  const rule       = rules.find(x => x.id === r.ruleId)
+                  const conn       = connections.find(c => c.name === r.connectionName) ?? connections.find(c => c.id === rule?.connectionId)
                   return (
-                    <tr key={i} style={{ borderBottom: '1px solid #f8fafc' }}>
-                      <td style={{ padding: '10px', fontWeight: 500, color: '#0f172a' }}>{r.ruleName}</td>
-                      <td style={{ padding: '10px', color: '#64748b' }}>
-                        <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', fontSize: '11px' }}>
-                          {r.tableName}{r.columnName ? `.${r.columnName}` : ''}
-                        </code>
-                      </td>
-                      <td style={{ padding: '10px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <div style={{ width: '40px', height: '4px', borderRadius: '2px', background: '#f1f5f9', overflow: 'hidden' }}>
-                            <div style={{ height: '100%', width: `${r.score}%`, background: scoreColor(r.score) }} />
+                    <React.Fragment key={rowKey}>
+                      <tr style={{ borderBottom: isExpanded ? 'none' : '1px solid #f8fafc', cursor: 'pointer', background: isExpanded ? '#fafaf9' : 'transparent' }}
+                        onClick={() => setExpandedRow(isExpanded ? null : rowKey)}>
+                        <td style={{ padding: '10px', color: '#94a3b8', width: '20px' }}>{isExpanded ? '▾' : '▸'}</td>
+                        <td style={{ padding: '10px', fontWeight: 500, color: '#0f172a' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            <span>{r.ruleName}</span>
+                            {r.scope && (
+                              r.scope === 'generic'
+                                ? <span title="Came from a generic rule that fans out across every table" style={{ background: '#f5f3ff', color: '#7c3aed', padding: '1px 6px', borderRadius: '20px', fontSize: '9.5px', fontWeight: 700, letterSpacing: '0.04em' }}>🌐 GENERIC</span>
+                                : <span title="Came from a rule targeting one specific table/column" style={{ background: '#eff6ff', color: '#1d4ed8', padding: '1px 6px', borderRadius: '20px', fontSize: '9.5px', fontWeight: 700, letterSpacing: '0.04em' }}>🎯 SPECIFIC</span>
+                            )}
                           </div>
-                          <span style={{ fontWeight: 700, color: scoreColor(r.score) }}>{r.score}%</span>
-                        </div>
-                      </td>
-                      <td style={{ padding: '10px', color: '#64748b' }}>{formatNumber(r.recordsChecked)}</td>
-                      <td style={{ padding: '10px', color: r.recordsFailed > 0 ? '#ef4444' : '#10b981', fontWeight: r.recordsFailed > 0 ? 600 : 400 }}>{formatNumber(r.recordsFailed)}</td>
-                      <td style={{ padding: '10px' }}>
-                        <span style={{ background: s.bg, color: s.color, padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 600 }}>{s.label}</span>
-                      </td>
-                      <td style={{ padding: '10px', color: '#94a3b8', fontSize: '12px' }}>{(r.duration / 1000).toFixed(1)}s</td>
-                    </tr>
+                        </td>
+                        <td style={{ padding: '10px', color: '#64748b' }}>
+                          <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', fontSize: '11px' }}>
+                            {r.tableName}{r.columnName ? `.${r.columnName}` : ''}
+                          </code>
+                        </td>
+                        <td style={{ padding: '10px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <div style={{ width: '40px', height: '4px', borderRadius: '2px', background: '#f1f5f9', overflow: 'hidden' }}>
+                              <div style={{ height: '100%', width: `${r.score}%`, background: scoreColor(r.score) }} />
+                            </div>
+                            <span style={{ fontWeight: 700, color: scoreColor(r.score) }}>{r.score}%</span>
+                          </div>
+                        </td>
+                        <td style={{ padding: '10px', color: '#64748b' }}>{formatNumber(r.recordsChecked)}</td>
+                        <td style={{ padding: '10px', color: r.recordsFailed > 0 ? '#ef4444' : '#10b981', fontWeight: r.recordsFailed > 0 ? 600 : 400 }}>{formatNumber(r.recordsFailed)}</td>
+                        <td style={{ padding: '10px' }}>
+                          <span style={{ background: s.bg, color: s.color, padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 600 }}>{s.label}</span>
+                        </td>
+                        <td style={{ padding: '10px', color: '#94a3b8', fontSize: '12px' }}>{(r.duration / 1000).toFixed(1)}s</td>
+                      </tr>
+                      {isExpanded && (
+                        <tr style={{ borderBottom: '1px solid #f1f5f9', background: '#fafaf9' }}>
+                          <td colSpan={8} style={{ padding: '0 16px 16px' }}>
+                            <ResultDetail r={r} rule={rule} conn={conn} />
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   )
                 })}
               </tbody>
@@ -349,6 +442,123 @@ export default function ReportsClient({ initialReports }: { initialReports: Repo
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/* ─── Per-result detail panel: shows how the rule actually worked ──────── */
+function ResultDetail({ r, rule, conn }: { r: CheckResult; rule?: Rule; conn?: Connection }) {
+  // If we have the canonical rule we generate exact SQL; otherwise fall back
+  // to a placeholder shape so the user still sees the explanation.
+  // Ad-hoc results created by report-type filters (freshness/anomaly/sla/lineage)
+  // encode their rule type in the ruleId prefix (e.g. "adhoc_freshness_TABLE").
+  const adhocType =
+    r.ruleId.startsWith('adhoc_freshness') ? 'freshness' :
+    r.ruleId.startsWith('adhoc_row_count') ? 'row_count' :
+    r.ruleId.startsWith('adhoc_anomaly')   ? 'custom_sql' :
+    r.ruleId.startsWith('adhoc_sla')       ? 'freshness' :
+    r.ruleId.startsWith('adhoc_lineage')   ? 'referential' :
+    'custom_sql'
+
+  const placeholderRule: Rule = rule ?? {
+    id:           r.ruleId,
+    name:         r.ruleName,
+    description:  '',
+    category:     'completeness',
+    type:         adhocType as Rule['type'],
+    connectionId: '',
+    tableName:    r.tableName,
+    columnName:   r.columnName,
+    parameters:   {},
+    enabled:      true,
+    severity:     'medium',
+    createdAt:    r.executedAt,
+  }
+  const sql  = buildRuleSql(placeholderRule, conn)
+  const mech = ruleMechanics(placeholderRule)
+  const pct  = r.recordsChecked > 0 ? ((r.recordsChecked - r.recordsFailed) / r.recordsChecked) * 100 : 0
+  const sevColor = r.status === 'passed' ? '#16a34a' : r.status === 'failed' ? '#dc2626' : '#d97706'
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', padding: '12px 0' }}>
+      {/* RULES CHECK */}
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '12px 14px' }}>
+        <div style={{ fontSize: '10.5px', color: '#7c3aed', fontWeight: 700, letterSpacing: '0.05em', marginBottom: '8px', textTransform: 'uppercase' }}>🎯 Rules check</div>
+        <Row k="Rule Type"      v={RULE_TYPE_LABEL[placeholderRule.type] ?? placeholderRule.type} mono />
+        <Row k="Pass Condition" v={mech.passCondition} />
+        <Row k="Description"    v={placeholderRule.description || '— no description on the rule —'} />
+        {placeholderRule.severity && <Row k="Severity" v={placeholderRule.severity.toUpperCase()} mono />}
+      </div>
+
+      {/* EXECUTION */}
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '12px 14px' }}>
+        <div style={{ fontSize: '10.5px', color: '#1d4ed8', fontWeight: 700, letterSpacing: '0.05em', marginBottom: '8px', textTransform: 'uppercase' }}>⚙️ Execution</div>
+        <Row k="Connection"   v={r.connectionName} mono />
+        {conn?.schema && <Row k="Schema"  v={conn.schema} mono />}
+        <Row k="Target"       v={`${r.tableName}${r.columnName ? '.' + r.columnName : ''}`} mono />
+        <Row k="Executed At"  v={new Date(r.executedAt).toLocaleString()} />
+        <Row k="Duration"     v={`${(r.duration / 1000).toFixed(2)}s`} />
+      </div>
+
+      {/* RESULT */}
+      <div style={{ background: '#fff', border: `1px solid ${sevColor}40`, borderRadius: '10px', padding: '12px 14px' }}>
+        <div style={{ fontSize: '10.5px', color: sevColor, fontWeight: 700, letterSpacing: '0.05em', marginBottom: '8px', textTransform: 'uppercase' }}>📊 Result</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '8px', marginBottom: '10px' }}>
+          <Stat label="Pass rate" value={`${pct.toFixed(1)}%`} color={sevColor} />
+          <Stat label="Records"   value={formatNumber(r.recordsChecked)} color="#475569" />
+          <Stat label="Failed"    value={formatNumber(r.recordsFailed)} color={r.recordsFailed > 0 ? '#dc2626' : '#16a34a'} />
+        </div>
+        {r.details && (
+          <div style={{ background: '#f8fafc', borderRadius: '7px', padding: '8px 10px', fontSize: '11.5px', color: '#475569', lineHeight: 1.5 }}>
+            <strong style={{ color: '#1a1a1a' }}>Details:</strong> {r.details}
+          </div>
+        )}
+      </div>
+
+      {/* FAILURE */}
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '12px 14px' }}>
+        <div style={{ fontSize: '10.5px', color: '#dc2626', fontWeight: 700, letterSpacing: '0.05em', marginBottom: '8px', textTransform: 'uppercase' }}>⚠️ Failure</div>
+        <div style={{ fontSize: '12px', color: '#475569', lineHeight: 1.5, marginBottom: '8px' }}>{mech.failureMeans}</div>
+        <div style={{ fontSize: '10.5px', color: '#94a3b8', fontWeight: 700, marginBottom: '3px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Business Impact</div>
+        <div style={{ fontSize: '12px', color: '#475569', lineHeight: 1.5 }}>{mech.impact}</div>
+      </div>
+
+      {/* SQL EXECUTED */}
+      <div style={{ gridColumn: '1 / -1' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+          <div style={{ fontSize: '10.5px', color: '#475569', fontWeight: 700, letterSpacing: '0.05em' }}>📜 SQL EXECUTED AGAINST {(conn?.type ?? 'WAREHOUSE').toString().toUpperCase()}</div>
+          <button onClick={() => navigator.clipboard.writeText(sql)}
+            style={{ background: '#fff', border: '1px solid #e2e8f0', padding: '4px 10px', borderRadius: '6px', fontSize: '11px', color: '#475569', fontWeight: 500, cursor: 'pointer' }}>
+            📋 Copy SQL
+          </button>
+        </div>
+        <pre style={{ margin: 0, padding: '14px 16px', background: '#0f172a', color: '#e2e8f0', borderRadius: '8px', fontSize: '11.5px', lineHeight: 1.55, fontFamily: 'monospace', overflow: 'auto', whiteSpace: 'pre' }}>
+          {sql}
+        </pre>
+        {!rule && (
+          <div style={{ marginTop: '6px', fontSize: '10.5px', color: '#94a3b8', fontStyle: 'italic' }}>
+            ℹ️ The original rule definition for &ldquo;{r.ruleName}&rdquo; is no longer in your Rules list, so this is a representative query based on the rule type. Add the rule back to see the exact SQL it ran.
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function Row({ k, v, mono = false }: { k: string; v: string; mono?: boolean }) {
+  return (
+    <div style={{ marginBottom: '6px' }}>
+      <div style={{ fontSize: '9.5px', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{k}</div>
+      <div style={{ fontSize: '12.5px', color: '#1a1a1a', fontFamily: mono ? 'monospace' : 'inherit', lineHeight: 1.4, wordBreak: 'break-word' }}>{v}</div>
+    </div>
+  )
+}
+
+function Stat({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div style={{ background: '#f8fafc', borderRadius: '7px', padding: '7px 10px', textAlign: 'center' }}>
+      <div style={{ fontSize: '9.5px', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{label}</div>
+      <div style={{ fontSize: '15px', fontWeight: 800, color }}>{value}</div>
     </div>
   )
 }

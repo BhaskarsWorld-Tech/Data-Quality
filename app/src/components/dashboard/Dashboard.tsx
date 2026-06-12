@@ -1,431 +1,424 @@
 'use client'
-import { useState, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { CheckResult } from '@/lib/types'
-import { formatNumber } from '@/lib/utils'
+import { ConnectionToolbar } from '@/components/shared/ConnectionToolbar'
 
-interface DashboardStats {
-  totalRules: number; enabledRules: number; totalConnections: number
-  activeConnections: number; overallScore: number; passed: number
-  failed: number; warnings: number; totalChecks: number
-  trend: { date: string; score: number }[]; recentChecks: CheckResult[]
-  lastRunAt: string | null
+/* ─── types ─────────────────────────────────────────────────────────────── */
+interface SfTable {
+  name: string; type: string; rows: number; bytes: number
+  columns: number; nullableColumns: number; notNullColumns: number
+}
+interface SfConnection {
+  id: string; name: string; warehouse: string; schema: string
+  database: string; type: string; status: string
+}
+interface Summary {
+  tableCount: number; populated: number; empty: number
+  totalRows: number; totalBytes: number
+  totalCols: number; nullableCols: number; notNullCols: number
+  overallScore: number; completenessScore: number
+  populationScore: number; schemaHealthScore: number
+}
+interface OverviewData {
+  connection: SfConnection
+  summary:    Summary
+  tables:     SfTable[]
+  issues:     Array<{ id: string; table: string; severity: string; title: string }>
+  anomalies:  Array<{ id: string; table: string; type: string; severity: string }>
+}
+interface ConnectionListItem {
+  id: string; name: string; type: string; status: string
+  warehouse?: string; schema?: string
 }
 
-const TIME_OPTIONS = ['Last 1 hour','Last 6 hours','Last 24 hours','Last 7 days','Last 14 days','Last 30 days']
-const DOMAIN_OPTIONS = ['All domains','Finance','Marketing','Sales','Engineering','Supply Chain','Data Platform']
+/* ─── helpers ───────────────────────────────────────────────────────────── */
+function fmt(n: number) {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
+  if (n >= 1_000)     return (n / 1_000).toFixed(1) + 'K'
+  return String(n)
+}
+function fmtBytes(b: number) {
+  if (b >= 1_073_741_824) return (b / 1_073_741_824).toFixed(2) + ' GB'
+  if (b >= 1_048_576)     return (b / 1_048_576).toFixed(1) + ' MB'
+  if (b >= 1_024)         return (b / 1_024).toFixed(1) + ' KB'
+  return b + ' B'
+}
+function scoreColor(s: number) { return s >= 90 ? '#16a34a' : s >= 75 ? '#ea8b3a' : '#dc2626' }
+function scoreBg(s: number)    { return s >= 90 ? '#dcfce7' : s >= 75 ? '#fef3c7' : '#fee2e2' }
 
-const dimensions = [
-  { name: 'Completeness', score: 98, color: '#16a34a', category: 'completeness' },
-  { name: 'Accuracy',     score: 96, color: '#16a34a', category: 'accuracy' },
-  { name: 'Validity',     score: 87, color: '#ea8b3a', category: 'validity' },
-  { name: 'Consistency',  score: 94, color: '#16a34a', category: 'consistency' },
-  { name: 'Timeliness',   score: 79, color: '#dc2626', category: 'timeliness' },
-  { name: 'Uniqueness',   score: 99, color: '#16a34a', category: 'uniqueness' },
-]
-
-const failingRules = [
-  { name: 'order_total > 0', source: 'orders.transactions', detail: '412 fails', severity: 'critical' },
-  { name: 'email matches regex', source: 'crm.users', detail: '287 fails', severity: 'critical' },
-  { name: 'freshness < 6h', source: 'ga.sessions', detail: '1.2h late', severity: 'warning' },
-  { name: 'sku not null', source: 'inventory.items', detail: '94 fails', severity: 'warning' },
-  { name: 'row count Δ < 20%', source: 'finance.ledger', detail: '31% drop', severity: 'warning' },
-]
-
-const datasetsAttention = [
-  { name: 'prod.orders_fact', source: 'Snowflake', score: 71, freshness: '14m ago', issues: '5 critical', issueSev: 'critical', owner: 'Data platform', id: 'orders_fact' },
-  { name: 'crm.users_dim', source: 'Postgres', score: 82, freshness: '1h ago', issues: '3 medium', issueSev: 'warning', owner: 'Growth', id: 'users_dim' },
-  { name: 'ga.sessions_daily', source: 'BigQuery', score: 85, freshness: '7h late', issues: '2 medium', issueSev: 'warning', owner: 'Marketing', id: 'sessions_daily', lateFreshness: true },
-  { name: 'inv.items_stock', source: 'Databricks', score: 89, freshness: '22m ago', issues: '1 medium', issueSev: 'warning', owner: 'Supply chain', id: 'items_stock' },
-  { name: 'fin.ledger_gl', source: 'Oracle', score: 96, freshness: '3m ago', issues: '— none', issueSev: 'none', owner: 'Finance', id: 'ledger_gl' },
-]
-
-function Dropdown({ label, options, value, onChange }: { label: string; options: string[]; value: string; onChange: (v: string) => void }) {
+/* ─── connection picker ─────────────────────────────────────────────────── */
+function ConnectionPicker({
+  connections, value, onChange, onRefresh, refreshing, activeConn
+}: {
+  connections: ConnectionListItem[]
+  value: string
+  onChange: (id: string) => void
+  onRefresh: () => void
+  refreshing: boolean
+  activeConn?: SfConnection | null
+}) {
   const [open, setOpen] = useState(false)
+  const active = connections.find(c => c.id === value)
+
   return (
-    <div style={{ position: 'relative' }}>
-      <button onClick={() => setOpen(!open)} style={{
-        background: '#fff', border: '1px solid #ebe8df', padding: '7px 14px',
-        borderRadius: '8px', fontSize: '12.5px', color: '#475569', cursor: 'pointer',
-        fontWeight: 500, display: 'flex', alignItems: 'center', gap: '6px',
-        boxShadow: open ? '0 0 0 2px #bfdbfe' : 'none'
-      }}>
-        {value.includes('domains') && value !== 'All domains'
-          ? <><span style={{ background: '#dbeafe', color: '#2563eb', padding: '1px 6px', borderRadius: '4px', fontWeight: 600 }}>{value}</span></>
-          : value}
-        <span style={{ fontSize: '10px', transition: 'transform 0.2s', transform: open ? 'rotate(180deg)' : 'none' }}>▾</span>
+    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+      <div style={{ position: 'relative' }}>
+        <button onClick={() => setOpen(!open)} style={{
+          background: '#fff', border: '1px solid #93c5fd', padding: '7px 14px',
+          borderRadius: '8px', fontSize: '12.5px', color: '#1d4ed8', cursor: 'pointer',
+          fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px',
+          minWidth: '240px', justifyContent: 'space-between',
+          boxShadow: open ? '0 0 0 3px #dbeafe' : '0 1px 2px rgba(0,0,0,0.04)'
+        }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '14px' }}>❄️</span>
+            <span>{active?.name ?? 'Select connection'}</span>
+            {active?.status === 'active' && <span style={{ color: '#16a34a', fontSize: '8px' }}>●</span>}
+          </span>
+          <span style={{ fontSize: '10px', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▾</span>
+        </button>
+        {open && (
+          <div style={{
+            position: 'absolute', top: 'calc(100% + 6px)', left: 0,
+            background: '#fff', border: '1px solid #e2e8f0', borderRadius: '10px',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.12)', zIndex: 100,
+            minWidth: '260px', overflow: 'hidden'
+          }}>
+            <div style={{ padding: '8px 14px', fontSize: '10.5px', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.08em', borderBottom: '1px solid #f3f1ea' }}>
+              {connections.length} CONNECTION{connections.length !== 1 ? 'S' : ''}
+            </div>
+            {connections.map(c => {
+              const isActive = c.id === value
+              return (
+                <button key={c.id} onClick={() => { onChange(c.id); setOpen(false) }} style={{
+                  display: 'block', width: '100%', padding: '10px 14px', textAlign: 'left',
+                  background: isActive ? '#eff6ff' : '#fff', border: 'none', cursor: 'pointer',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 600, color: isActive ? '#1d4ed8' : '#1a1a1a' }}>
+                    <span>❄️</span>
+                    <span>{c.name}</span>
+                    {c.status === 'active' && <span style={{ color: '#16a34a', fontSize: '8px', marginLeft: 'auto' }}>● active</span>}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px', marginLeft: '22px' }}>
+                    {c.warehouse ?? '—'} · {c.schema ?? '—'}
+                  </div>
+                </button>
+              )
+            })}
+            <Link href="/connections" style={{ display: 'block', padding: '10px 14px', borderTop: '1px solid #f3f1ea', fontSize: '12px', color: '#2563eb', textDecoration: 'none', fontWeight: 500 }}>
+              + Add new connection
+            </Link>
+          </div>
+        )}
+      </div>
+
+      <button onClick={onRefresh} disabled={refreshing} style={{
+        background: '#fff', border: '1px solid #e2e8f0', padding: '7px 12px',
+        borderRadius: '8px', cursor: refreshing ? 'not-allowed' : 'pointer',
+        fontSize: '12.5px', color: '#475569', fontWeight: 600,
+        display: 'flex', alignItems: 'center', gap: '6px',
+        opacity: refreshing ? 0.6 : 1,
+      }}
+      title="Refresh data from Snowflake">
+        <span style={{ display: 'inline-block', animation: refreshing ? 'spin 1s linear infinite' : 'none' }}>⟳</span>
+        {refreshing ? 'Refreshing…' : 'Refresh'}
       </button>
-      {open && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 6px)', left: 0, background: '#fff',
-          border: '1px solid #ebe8df', borderRadius: '10px', boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-          zIndex: 100, minWidth: '170px', overflow: 'hidden'
-        }}>
-          {options.map(opt => (
-            <button key={opt} onClick={() => { onChange(opt); setOpen(false) }} style={{
-              display: 'block', width: '100%', padding: '9px 14px', textAlign: 'left',
-              background: opt === value ? '#eff6ff' : '#fff', border: 'none',
-              fontSize: '13px', color: opt === value ? '#2563eb' : '#374151',
-              fontWeight: opt === value ? 600 : 400, cursor: 'pointer'
-            }}>
-              {opt === value && '✓ '}{opt}
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   )
 }
 
-function ScorePill({ score }: { score: number }) {
-  const color = score >= 90 ? '#16a34a' : score >= 80 ? '#ea8b3a' : '#dc2626'
-  const bg = score >= 90 ? '#dcfce7' : score >= 80 ? '#fef3c7' : '#fee2e2'
-  return <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: bg, color, padding: '3px 12px', borderRadius: '20px', fontSize: '13px', fontWeight: 600, minWidth: '38px' }}>{score}</span>
-}
-
-function TrendChart({ data }: { data: { date: string; score: number }[] }) {
-  const [tooltip, setTooltip] = useState<{ x: number; y: number; score: number; date: string } | null>(null)
-  const svgRef = useRef<SVGSVGElement>(null)
-
-  const w = 600, h = 180, pad = { top: 20, right: 20, bottom: 30, left: 35 }
-  const chartW = w - pad.left - pad.right, chartH = h - pad.top - pad.bottom
-  const max = 100, min = 82
-
-  const pts = data.map((d, i) => ({
-    x: pad.left + (i / (data.length - 1)) * chartW,
-    y: pad.top + chartH - ((d.score - min) / (max - min)) * chartH,
-    score: d.score, date: d.date
-  }))
-
-  const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ')
-  const areaPath = `${linePath} L${pts[pts.length - 1].x},${pad.top + chartH} L${pts[0].x},${pad.top + chartH} Z`
-
-  // Fixed random incident bar heights (seeded)
-  const incidentHeights = data.map((_, i) => [8, 14, 6, 18, 10, 7, 20, 12, 5, 16, 9][i % 11])
-
-  return (
-    <div style={{ position: 'relative' }}>
-      <svg ref={svgRef} width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ overflow: 'visible', cursor: 'crosshair' }}
-        onMouseLeave={() => setTooltip(null)}
-        onMouseMove={e => {
-          if (!svgRef.current) return
-          const rect = svgRef.current.getBoundingClientRect()
-          const relX = ((e.clientX - rect.left) / rect.width) * w
-          let closest = pts[0], minDist = Infinity
-          pts.forEach(p => { const d = Math.abs(p.x - relX); if (d < minDist) { minDist = d; closest = p } })
-          if (minDist < 30) setTooltip({ x: (closest.x / w) * 100, y: (closest.y / h) * 100, score: closest.score, date: closest.date })
-          else setTooltip(null)
-        }}>
-        <defs>
-          <linearGradient id="ag2" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.15" />
-            <stop offset="100%" stopColor="#3b82f6" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        {[100, 95, 90, 85].map(v => {
-          const y = pad.top + chartH - ((v - min) / (max - min)) * chartH
-          return <g key={v}><line x1={pad.left} x2={w - pad.right} y1={y} y2={y} stroke="#e5e7eb" strokeWidth="1" strokeDasharray="3 3" /><text x={pad.left - 6} y={y + 4} textAnchor="end" fontSize="10" fill="#9ca3af">{v}</text></g>
-        })}
-        {data.map((d, i) => {
-          const barH = incidentHeights[i]
-          return <rect key={i} x={pad.left + (i / (data.length - 1)) * chartW - 5} y={pad.top + chartH - barH} width="10" height={barH} fill="#ef4444" opacity="0.75" rx="2" />
-        })}
-        <path d={areaPath} fill="url(#ag2)" />
-        <path d={linePath} fill="none" stroke="#3b82f6" strokeWidth="2.5" strokeLinejoin="round" />
-        {pts.map((p, i) => (
-          <circle key={i} cx={p.x} cy={p.y} r={tooltip?.date === p.date ? 5 : 3}
-            fill={tooltip?.date === p.date ? '#fff' : '#3b82f6'}
-            stroke="#3b82f6" strokeWidth="2"
-            style={{ transition: 'r 0.1s' }} />
-        ))}
-        {data.filter((_, i) => i % Math.ceil(data.length / 7) === 0 || i === data.length - 1).map((d, _, arr) => {
-          const idx = data.indexOf(d)
-          return <text key={idx} x={pad.left + (idx / (data.length - 1)) * chartW} y={h - 8} textAnchor="middle" fontSize="10" fill="#9ca3af">{d.date}</text>
-        })}
-      </svg>
-      {tooltip && (
-        <div style={{
-          position: 'absolute', left: `${tooltip.x}%`, top: `${tooltip.y}%`,
-          transform: 'translate(-50%, -130%)', background: '#1e293b', color: '#fff',
-          padding: '6px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: 600,
-          pointerEvents: 'none', whiteSpace: 'nowrap', boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-          zIndex: 10
-        }}>
-          <div>{tooltip.date}</div>
-          <div style={{ color: '#60a5fa', fontSize: '16px' }}>{tooltip.score}%</div>
-          <div style={{ position: 'absolute', bottom: '-5px', left: '50%', transform: 'translateX(-50%)', width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderTop: '5px solid #1e293b' }} />
-        </div>
-      )}
-    </div>
-  )
-}
-
-export default function Dashboard({ stats }: { stats: DashboardStats }) {
-  const [running, setRunning] = useState(false)
-  const [timeFilter, setTimeFilter] = useState('Last 7 days')
-  const [domainFilter, setDomainFilter] = useState('All domains')
-  const [activeMetric, setActiveMetric] = useState<string | null>(null)
+/* ─── main dashboard ────────────────────────────────────────────────────── */
+export default function Dashboard() {
+  const [connections, setConnections] = useState<ConnectionListItem[]>([])
+  const [selectedId, setSelectedId]   = useState<string>('')
+  const [data, setData]               = useState<OverviewData | null>(null)
+  const [loading, setLoading]         = useState(true)
+  const [refreshing, setRefreshing]   = useState(false)
+  const [error, setError]             = useState('')
   const router = useRouter()
 
-  async function runCheck() {
-    setRunning(true)
-    await fetch('/api/reports', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
-    setRunning(false)
-    router.refresh()
-  }
+  // 1. Load list of connections once
+  useEffect(() => {
+    fetch('/api/connections')
+      .then(r => r.json())
+      .then((all: ConnectionListItem[]) => {
+        const snowflake = all.filter(c => c.type === 'snowflake')
+        setConnections(snowflake)
+        const initial = snowflake.find(c => c.status === 'active')?.id ?? snowflake[0]?.id ?? ''
+        setSelectedId(initial)
+      })
+      .catch(e => setError((e as Error).message))
+  }, [])
 
-  const score = stats.overallScore || 94.2
-  const trendData = stats.trend.length > 0 ? stats.trend : [
-    { date: 'Apr 5', score: 93 }, { date: 'Apr 8', score: 91 }, { date: 'Apr 11', score: 94 },
-    { date: 'Apr 14', score: 92 }, { date: 'Apr 17', score: 95 }, { date: 'Apr 20', score: 93 },
-    { date: 'Apr 23', score: 96 }, { date: 'Apr 26', score: 94 }, { date: 'Apr 29', score: 96 },
-    { date: 'May 2', score: 95 }, { date: 'May 5', score: 97 }
-  ]
+  // 2. Fetch overview whenever selected connection changes
+  const fetchOverview = useCallback(async (id: string, isRefresh = false) => {
+    if (!id) { setLoading(false); return }
+    isRefresh ? setRefreshing(true) : setLoading(true)
+    setError('')
+    try {
+      const res  = await fetch(`/api/snowflake/overview?connectionId=${encodeURIComponent(id)}`, { cache: 'no-store' })
+      const json = await res.json() as OverviewData & { error?: string }
+      if (!res.ok || json.error) throw new Error(json.error ?? `HTTP ${res.status}`)
+      setData(json)
+    } catch (e) {
+      setError((e as Error).message)
+      setData(null)
+    } finally {
+      setLoading(false); setRefreshing(false)
+    }
+  }, [])
 
+  useEffect(() => { if (selectedId) fetchOverview(selectedId) }, [selectedId, fetchOverview])
+
+  const summary  = data?.summary
+  const tables   = data?.tables ?? []
+  const issues   = data?.issues ?? []
+  const anoms    = data?.anomalies ?? []
+  const conn     = data?.connection
+
+  const tablesSorted = [...tables].sort((a, b) => b.rows - a.rows)
+
+  /* ─── render ──────────────────────────────────────────────────────────── */
   return (
-    <div style={{ padding: '28px 36px', maxWidth: '1300px' }} onClick={() => setActiveMetric(null)}>
+    <div style={{ padding: '28px 36px', maxWidth: '1300px' }}>
+      <style>{`@keyframes spin { from { transform: rotate(0) } to { transform: rotate(360deg) } }`}</style>
+
       <div style={{ fontSize: '12.5px', color: '#94a3b8', marginBottom: '8px' }}>
         Workspace · <span style={{ color: '#475569' }}>Analytics platform</span>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#1a1a1a', margin: 0, letterSpacing: '-0.4px' }}>Data quality overview</h1>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <Dropdown label="time" options={TIME_OPTIONS} value={timeFilter} onChange={setTimeFilter} />
-          <Dropdown label="domain" options={DOMAIN_OPTIONS} value={domainFilter} onChange={setDomainFilter} />
-          <button onClick={runCheck} disabled={running} style={{
-            background: '#dbeafe', border: '1px solid #93c5fd', padding: '7px 14px',
-            borderRadius: '8px', fontSize: '12.5px', color: '#2563eb', cursor: running ? 'not-allowed' : 'pointer',
-            fontWeight: 600, opacity: running ? 0.6 : 1
-          }}>{running ? '⏳ Running…' : '+ New rule'}</button>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px', gap: '12px', flexWrap: 'wrap' }}>
+        <div>
+          <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#1a1a1a', margin: 0, letterSpacing: '-0.4px' }}>Data quality overview</h1>
+          <p style={{ fontSize: '12.5px', color: '#94a3b8', margin: '4px 0 0' }}>
+            {conn ? `Live metrics from ${conn.warehouse} / ${conn.schema}` : 'Pick a connection to view metrics'}
+          </p>
         </div>
+        <ConnectionToolbar
+          connections={connections}
+          selectedId={selectedId}
+          onChange={setSelectedId}
+          onRefresh={() => fetchOverview(selectedId, true)}
+          refreshing={refreshing}
+          conn={conn}
+        />
       </div>
 
-      {/* KPI Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginBottom: '20px' }}>
-        {/* Overall Quality Score */}
-        <Link href="/reports" style={{ textDecoration: 'none' }}>
-          <div style={{ ...card, cursor: 'pointer', transition: 'box-shadow 0.2s' }}
-            onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.1)')}
-            onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}>
-            <div style={cardLabel}>Overall quality score</div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginBottom: '10px' }}>
-              <span style={{ fontSize: '40px', fontWeight: 700, color: '#1a1a1a', letterSpacing: '-1.5px', lineHeight: 1 }}>{score.toFixed(1)}</span>
-              <div style={{ display: 'flex', flexDirection: 'column', fontSize: '11px', color: '#64748b' }}>
-                <span style={{ fontWeight: 700, color: '#16a34a', fontSize: '13px' }}>▲ 1.4</span>
-                <span>vs last week</span>
-              </div>
-            </div>
-            {/* Stacked bar */}
-            <div style={{ display: 'flex', height: '6px', borderRadius: '3px', overflow: 'hidden', marginBottom: '8px', gap: '1px' }}>
-              <div style={{ background: '#16a34a', flex: stats.passed || 268, transition: 'flex 0.5s' }} />
-              <div style={{ background: '#ea8b3a', flex: stats.warnings || 91 }} />
-              <div style={{ background: '#dc2626', flex: stats.failed || 59 }} />
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
-              {[['Passing', stats.passed || 268, '#16a34a'], ['Warning', stats.warnings || 91, '#ea8b3a'], ['Failing', stats.failed || 59, '#dc2626']].map(([l, v, c]) => (
-                <div key={l as string}>
-                  <div style={{ color: '#475569' }}>{l}</div>
-                  <div style={{ fontWeight: 700, color: c as string }}>{v as number}</div>
+      {/* Connection details are now shown inline beneath the picker in the header */}
+
+      {/* Loading / error */}
+      {loading && (
+        <div style={{ height: '300px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '12px', color: '#94a3b8' }}>
+          <div style={{ fontSize: '32px' }}>❄️</div>
+          <div style={{ fontSize: '14px' }}>Loading live metrics from Snowflake…</div>
+        </div>
+      )}
+
+      {error && !loading && (
+        <div style={{ background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: '10px', padding: '20px', textAlign: 'center', color: '#dc2626', marginBottom: '16px' }}>
+          <div style={{ fontSize: '14px', fontWeight: 600 }}>Could not load data</div>
+          <div style={{ fontSize: '12px', marginTop: '4px' }}>{error}</div>
+        </div>
+      )}
+
+      {!loading && !error && summary && (
+        <>
+          {/* KPI cards — all computed from live data */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginBottom: '20px' }}>
+            <Link href="/reports" style={{ textDecoration: 'none' }}>
+              <div style={{ ...card, cursor: 'pointer' }}
+                onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.1)')}
+                onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}>
+                <div style={cardLabel}>Overall quality score</div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginBottom: '12px' }}>
+                  <span style={{ fontSize: '40px', fontWeight: 700, color: scoreColor(summary.overallScore), letterSpacing: '-1.5px', lineHeight: 1 }}>{summary.overallScore}</span>
+                  <span style={{ fontSize: '18px', fontWeight: 600, color: '#94a3b8' }}>%</span>
                 </div>
-              ))}
-            </div>
-          </div>
-        </Link>
-
-        {/* Open Issues */}
-        <Link href="/issues" style={{ textDecoration: 'none' }}>
-          <div style={{ ...card, cursor: 'pointer' }}
-            onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.1)')}
-            onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}>
-            <div style={cardLabel}>Open issues</div>
-            <div style={{ fontSize: '40px', fontWeight: 700, color: '#1a1a1a', letterSpacing: '-1.5px', marginBottom: '12px', lineHeight: 1 }}>23</div>
-            <div style={{ fontSize: '12.5px', color: '#475569', marginBottom: '8px' }}>
-              <span style={{ color: '#dc2626', fontWeight: 600 }}>8 critical</span> · <span style={{ color: '#ea8b3a', fontWeight: 600 }}>15 medium</span>
-            </div>
-            <div style={{ background: '#fee2e2', height: '4px', borderRadius: '2px', overflow: 'hidden' }}>
-              <div style={{ width: `${(8/23)*100}%`, height: '100%', background: '#dc2626' }} />
-            </div>
-          </div>
-        </Link>
-
-        {/* Datasets monitored */}
-        <Link href="/datasets" style={{ textDecoration: 'none' }}>
-          <div style={{ ...card, cursor: 'pointer' }}
-            onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.1)')}
-            onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}>
-            <div style={cardLabel}>Datasets monitored</div>
-            <div style={{ fontSize: '40px', fontWeight: 700, color: '#1a1a1a', letterSpacing: '-1.5px', marginBottom: '8px', lineHeight: 1 }}>142</div>
-            <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '8px' }}>across {stats.activeConnections || 9} sources</div>
-            <div style={{ display: 'flex', gap: '6px' }}>
-              <span style={{ background: '#dcfce7', color: '#16a34a', padding: '2px 8px', borderRadius: '20px', fontSize: '11px', fontWeight: 600 }}>↑ 12 new</span>
-            </div>
-          </div>
-        </Link>
-
-        {/* SLA Adherence */}
-        <Link href="/slas" style={{ textDecoration: 'none' }}>
-          <div style={{ ...card, cursor: 'pointer' }}
-            onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.1)')}
-            onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}>
-            <div style={cardLabel}>SLA adherence</div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px', marginBottom: '8px' }}>
-              <span style={{ fontSize: '40px', fontWeight: 700, color: '#1a1a1a', letterSpacing: '-1.5px', lineHeight: 1 }}>98.6</span>
-              <span style={{ fontSize: '18px', fontWeight: 600, color: '#475569' }}>%</span>
-            </div>
-            <div style={{ fontSize: '12.5px', color: '#16a34a', fontWeight: 700, marginBottom: '8px' }}>▲ 0.3 pts</div>
-            <div style={{ background: '#e5e7eb', height: '4px', borderRadius: '2px', overflow: 'hidden' }}>
-              <div style={{ width: '98.6%', height: '100%', background: '#16a34a' }} />
-            </div>
-          </div>
-        </Link>
-      </div>
-
-      {/* Six Dimensions */}
-      <div style={{ ...card, padding: '22px 24px', marginBottom: '20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-          <div style={{ fontSize: '14.5px', fontWeight: 700, color: '#1a1a1a' }}>Six dimensions of quality</div>
-          <div style={{ fontSize: '11.5px', color: '#94a3b8' }}>scored on 1.2M records · refreshed 4m ago · <span style={{ color: '#2563eb', cursor: 'pointer' }}>view all →</span></div>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '10px' }}>
-          {dimensions.map(d => (
-            <Link key={d.name} href={`/rules?category=${d.category}`} style={{ textDecoration: 'none' }}>
-              <div style={{ background: '#fafaf5', borderRadius: '10px', padding: '14px 12px', border: '1px solid #ebe8df', cursor: 'pointer', transition: 'all 0.15s' }}
-                onMouseEnter={e => { e.currentTarget.style.background = '#f0f9ff'; e.currentTarget.style.borderColor = '#93c5fd' }}
-                onMouseLeave={e => { e.currentTarget.style.background = '#fafaf5'; e.currentTarget.style.borderColor = '#ebe8df' }}>
-                <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '8px', fontWeight: 500 }}>{d.name}</div>
-                <div style={{ fontSize: '24px', fontWeight: 700, color: d.color, letterSpacing: '-0.5px', marginBottom: '8px' }}>{d.score}<span style={{ fontSize: '14px' }}>%</span></div>
-                <div style={{ height: '3px', background: '#e5e7eb', borderRadius: '2px', overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${d.score}%`, background: d.color, transition: 'width 0.5s' }} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
+                  {[
+                    ['Complete', summary.completenessScore],
+                    ['Populated', summary.populationScore],
+                    ['Schema', summary.schemaHealthScore],
+                  ].map(([l, v]) => (
+                    <div key={l as string}>
+                      <div style={{ color: '#475569' }}>{l}</div>
+                      <div style={{ fontWeight: 700, color: scoreColor(v as number) }}>{v}%</div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </Link>
-          ))}
-        </div>
-      </div>
 
-      {/* Trend + Failing Rules */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 310px', gap: '16px', marginBottom: '20px' }}>
-        <div style={card}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-            <div style={{ fontSize: '14.5px', fontWeight: 700, color: '#1a1a1a' }}>Quality trend · {timeFilter}</div>
-            <div style={{ display: 'flex', gap: '14px', fontSize: '11.5px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><div style={{ width: '10px', height: '3px', background: '#3b82f6', borderRadius: '2px' }} /><span style={{ color: '#475569' }}>Score</span></div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><div style={{ width: '10px', height: '10px', background: '#ef4444', borderRadius: '2px', opacity: 0.75 }} /><span style={{ color: '#475569' }}>Incidents</span></div>
+            <Link href="/issues" style={{ textDecoration: 'none' }}>
+              <div style={{ ...card, cursor: 'pointer' }}
+                onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.1)')}
+                onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}>
+                <div style={cardLabel}>Open issues</div>
+                <div style={{ fontSize: '40px', fontWeight: 700, color: '#1a1a1a', letterSpacing: '-1.5px', marginBottom: '8px', lineHeight: 1 }}>{issues.length}</div>
+                <div style={{ fontSize: '12.5px', color: '#475569', marginBottom: '8px' }}>
+                  <span style={{ color: '#dc2626', fontWeight: 600 }}>{issues.filter(i => i.severity === 'critical').length} critical</span>
+                  {' · '}
+                  <span style={{ color: '#ea8b3a', fontWeight: 600 }}>{issues.filter(i => i.severity === 'warning').length} warning</span>
+                </div>
+                {issues.length > 0 && (
+                  <div style={{ background: scoreBg(100 - issues.length * 5), height: '4px', borderRadius: '2px', overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.min(issues.length * 5, 100)}%`, height: '100%', background: '#dc2626' }} />
+                  </div>
+                )}
+              </div>
+            </Link>
+
+            <Link href="/datasets" style={{ textDecoration: 'none' }}>
+              <div style={{ ...card, cursor: 'pointer' }}
+                onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.1)')}
+                onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}>
+                <div style={cardLabel}>Datasets monitored</div>
+                <div style={{ fontSize: '40px', fontWeight: 700, color: '#1a1a1a', letterSpacing: '-1.5px', marginBottom: '8px', lineHeight: 1 }}>{summary.tableCount}</div>
+                <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '8px' }}>
+                  {summary.populated} with data · {summary.empty} empty
+                </div>
+                <div style={{ display: 'flex', height: '4px', borderRadius: '2px', overflow: 'hidden', gap: '1px' }}>
+                  <div style={{ background: '#16a34a', flex: summary.populated || 0.0001 }} />
+                  <div style={{ background: '#e5e7eb', flex: summary.empty || 0.0001 }} />
+                </div>
+              </div>
+            </Link>
+
+            <Link href="/anomalies" style={{ textDecoration: 'none' }}>
+              <div style={{ ...card, cursor: 'pointer' }}
+                onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.1)')}
+                onMouseLeave={e => (e.currentTarget.style.boxShadow = 'none')}>
+                <div style={cardLabel}>Anomalies detected</div>
+                <div style={{ fontSize: '40px', fontWeight: 700, color: '#1a1a1a', letterSpacing: '-1.5px', marginBottom: '8px', lineHeight: 1 }}>{anoms.length}</div>
+                <div style={{ fontSize: '12.5px', color: '#475569' }}>
+                  Statistical outliers in row volume across {summary.tableCount} tables
+                </div>
+              </div>
+            </Link>
+          </div>
+
+          {/* Quality dimensions — derived */}
+          <div style={{ ...card, padding: '22px 24px', marginBottom: '20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+              <div style={{ fontSize: '14.5px', fontWeight: 700, color: '#1a1a1a' }}>Quality dimensions · live</div>
+              <div style={{ fontSize: '11.5px', color: '#94a3b8' }}>
+                scored on {summary.tableCount} tables · {fmt(summary.totalRows)} rows · {summary.totalCols} columns
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+              {[
+                { name: 'Completeness',    score: summary.completenessScore, desc: `${summary.notNullCols} of ${summary.totalCols} columns enforce NOT NULL` },
+                { name: 'Population',      score: summary.populationScore,   desc: `${summary.populated} of ${summary.tableCount} tables contain data` },
+                { name: 'Schema Health',   score: summary.schemaHealthScore, desc: summary.schemaHealthScore === 100 ? 'All tables have readable schema' : 'Some tables missing column metadata' },
+              ].map(d => (
+                <div key={d.name} style={{ background: '#fafaf5', borderRadius: '10px', padding: '14px 16px', border: '1px solid #ebe8df' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                    <div style={{ fontSize: '12px', color: '#475569', fontWeight: 600 }}>{d.name}</div>
+                    <div style={{ fontSize: '24px', fontWeight: 700, color: scoreColor(d.score), letterSpacing: '-0.5px' }}>{d.score}<span style={{ fontSize: '14px' }}>%</span></div>
+                  </div>
+                  <div style={{ height: '4px', background: '#e5e7eb', borderRadius: '2px', overflow: 'hidden', margin: '8px 0' }}>
+                    <div style={{ height: '100%', width: `${d.score}%`, background: scoreColor(d.score), transition: 'width 0.5s' }} />
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#94a3b8' }}>{d.desc}</div>
+                </div>
+              ))}
             </div>
           </div>
-          <TrendChart data={trendData} />
-        </div>
 
-        <div style={card}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-            <div style={{ fontSize: '14.5px', fontWeight: 700, color: '#1a1a1a' }}>Top failing rules</div>
-            <Link href="/rules" style={{ fontSize: '11.5px', color: '#2563eb', textDecoration: 'none', fontWeight: 500 }}>View all →</Link>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {failingRules.map((rule, i) => (
-              <Link key={i} href="/rules" style={{ textDecoration: 'none' }}>
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start', padding: '6px 8px', borderRadius: '6px', cursor: 'pointer', transition: 'background 0.15s' }}
-                  onMouseEnter={e => (e.currentTarget.style.background = '#f8fafc')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                  <div style={{ width: '3px', alignSelf: 'stretch', background: rule.severity === 'critical' ? '#dc2626' : '#ea8b3a', borderRadius: '2px', marginTop: '3px', flexShrink: 0 }} />
-                  <div>
-                    <div style={{ fontSize: '13px', fontWeight: 600, color: '#1a1a1a' }}>{rule.name}</div>
-                    <div style={{ fontSize: '11.5px', color: '#94a3b8', marginTop: '2px' }}>{rule.source} · {rule.detail}</div>
-                  </div>
+          {/* Live tables + recent issues side by side */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 360px', gap: '16px', marginBottom: '20px' }}>
+            <div style={card}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                <div style={{ fontSize: '14.5px', fontWeight: 700, color: '#1a1a1a' }}>
+                  Live tables — {conn?.warehouse} / {conn?.schema}
                 </div>
-              </Link>
-            ))}
-          </div>
-        </div>
-      </div>
+                <Link href="/data-browser" style={{ fontSize: '12.5px', color: '#2563eb', textDecoration: 'none', fontWeight: 500 }}>Browse →</Link>
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid #ebe8df' }}>
+                    {['Table', 'Type', 'Rows', 'Cols', 'Status'].map(h => (
+                      <th key={h} style={{ textAlign: 'left', padding: '8px 12px', color: '#94a3b8', fontWeight: 500, fontSize: '11.5px' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {tablesSorted.map(t => {
+                    const hasData = t.rows > 0
+                    return (
+                      <tr key={t.name} style={{ borderBottom: '1px solid #f3f1ea', cursor: 'pointer' }}
+                        onMouseEnter={e => (e.currentTarget.style.background = '#fafaf9')}
+                        onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                        onClick={() => router.push('/data-browser')}>
+                        <td style={{ padding: '10px 12px', fontWeight: 600, color: '#1a1a1a' }}>{t.name}</td>
+                        <td style={{ padding: '10px 12px', color: '#475569', fontSize: '11.5px' }}>{t.type}</td>
+                        <td style={{ padding: '10px 12px', color: hasData ? '#1a1a1a' : '#94a3b8', fontWeight: hasData ? 600 : 400 }}>
+                          {hasData ? t.rows.toLocaleString() : '—'}
+                        </td>
+                        <td style={{ padding: '10px 12px', color: '#475569' }}>{t.columns}</td>
+                        <td style={{ padding: '10px 12px' }}>
+                          <span style={{
+                            background: hasData ? '#f0fdf4' : '#f8fafc',
+                            color:      hasData ? '#16a34a' : '#94a3b8',
+                            padding: '2px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 600
+                          }}>{hasData ? '● Active' : '○ Empty'}</span>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
 
-      {/* Datasets requiring attention */}
-      <div style={card}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-          <div style={{ fontSize: '14.5px', fontWeight: 700, color: '#1a1a1a' }}>Datasets requiring attention</div>
-          <Link href="/datasets" style={{ fontSize: '12.5px', color: '#2563eb', textDecoration: 'none', fontWeight: 500 }}>View all 142 →</Link>
-        </div>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid #ebe8df' }}>
-              {['Dataset', 'Source', 'Score', 'Freshness', 'Issues', 'Owner', ''].map(h => (
-                <th key={h} style={{ textAlign: 'left', padding: '8px 12px', color: '#94a3b8', fontWeight: 500, fontSize: '11.5px' }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {datasetsAttention.map((ds, i) => (
-              <tr key={i} style={{ borderBottom: '1px solid #f3f1ea', cursor: 'pointer', transition: 'background 0.1s' }}
-                onMouseEnter={e => (e.currentTarget.style.background = '#fafaf9')}
-                onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                onClick={() => router.push('/datasets')}>
-                <td style={{ padding: '12px' }}>
-                  <span style={{ color: '#94a3b8' }}>{ds.name.split('.')[0]}.</span>
-                  <span style={{ fontWeight: 600, color: '#1a1a1a' }}>{ds.name.split('.')[1]}</span>
-                </td>
-                <td style={{ padding: '12px', color: '#475569' }}>{ds.source}</td>
-                <td style={{ padding: '12px' }}><ScorePill score={ds.score} /></td>
-                <td style={{ padding: '12px', color: ds.lateFreshness ? '#ea8b3a' : '#475569', fontWeight: ds.lateFreshness ? 600 : 400 }}>{ds.freshness}</td>
-                <td style={{ padding: '12px' }}>
-                  {ds.issueSev !== 'none' ? (
-                    <span style={{ color: ds.issueSev === 'critical' ? '#dc2626' : '#ea8b3a', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '5px' }}>
-                      <span>•</span>{ds.issues}
-                    </span>
-                  ) : <span style={{ color: '#94a3b8' }}>{ds.issues}</span>}
-                </td>
-                <td style={{ padding: '12px', color: '#475569' }}>{ds.owner}</td>
-                <td style={{ padding: '12px' }}>
-                  <span style={{ color: '#2563eb', fontSize: '12px' }}>→</span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Live results if available */}
-      {stats.recentChecks.length > 0 && (
-        <div style={{ ...card, marginTop: '20px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-            <div style={{ fontSize: '14.5px', fontWeight: 700, color: '#1a1a1a' }}>Your latest check results</div>
-            <span style={{ fontSize: '11px', color: '#16a34a', background: '#dcfce7', padding: '3px 10px', borderRadius: '20px', fontWeight: 600 }}>LIVE</span>
+            <div style={card}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                <div style={{ fontSize: '14.5px', fontWeight: 700, color: '#1a1a1a' }}>Top issues</div>
+                <Link href="/issues" style={{ fontSize: '11.5px', color: '#2563eb', textDecoration: 'none', fontWeight: 500 }}>View all →</Link>
+              </div>
+              {issues.length === 0 ? (
+                <div style={{ padding: '20px', textAlign: 'center', color: '#16a34a' }}>
+                  <div style={{ fontSize: '24px', marginBottom: '4px' }}>✓</div>
+                  <div style={{ fontSize: '12.5px', fontWeight: 600 }}>No issues detected</div>
+                  <div style={{ fontSize: '11.5px', color: '#94a3b8' }}>Schema is healthy</div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '320px', overflowY: 'auto' }}>
+                  {issues.slice(0, 10).map(issue => {
+                    const sev = issue.severity
+                    const sevColor = sev === 'critical' ? '#dc2626' : sev === 'warning' ? '#ea8b3a' : '#64748b'
+                    return (
+                      <Link key={issue.id} href="/issues" style={{ textDecoration: 'none' }}>
+                        <div style={{ display: 'flex', gap: '10px', padding: '8px 10px', borderRadius: '7px', cursor: 'pointer' }}
+                          onMouseEnter={e => (e.currentTarget.style.background = '#f8fafc')}
+                          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                          <div style={{ width: '3px', alignSelf: 'stretch', background: sevColor, borderRadius: '2px', flexShrink: 0 }} />
+                          <div>
+                            <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#1a1a1a' }}>{issue.title}</div>
+                            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>{issue.table} · {sev}</div>
+                          </div>
+                        </div>
+                      </Link>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
           </div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid #ebe8df' }}>
-                {['Rule', 'Connection', 'Score', 'Records', 'Status'].map(h => (
-                  <th key={h} style={{ textAlign: 'left', padding: '8px 12px', color: '#94a3b8', fontWeight: 500, fontSize: '11.5px' }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {stats.recentChecks.map((c, i) => (
-                <tr key={i} style={{ borderBottom: '1px solid #f3f1ea', cursor: 'pointer' }}
-                  onMouseEnter={e => (e.currentTarget.style.background = '#fafaf9')}
-                  onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-                  onClick={() => router.push('/reports')}>
-                  <td style={{ padding: '12px', fontWeight: 500, color: '#1a1a1a' }}>{c.ruleName}</td>
-                  <td style={{ padding: '12px', color: '#475569' }}>{c.connectionName}</td>
-                  <td style={{ padding: '12px' }}><ScorePill score={Math.round(c.score)} /></td>
-                  <td style={{ padding: '12px', color: '#475569' }}>{formatNumber(c.recordsChecked)}</td>
-                  <td style={{ padding: '12px' }}>
-                    <span style={{
-                      background: c.status === 'passed' ? '#dcfce7' : c.status === 'failed' ? '#fee2e2' : '#fef3c7',
-                      color: c.status === 'passed' ? '#16a34a' : c.status === 'failed' ? '#dc2626' : '#ea8b3a',
-                      padding: '3px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase'
-                    }}>{c.status}</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        </>
+      )}
+
+      {!loading && !error && !summary && (
+        <div style={{ padding: '40px', textAlign: 'center', color: '#94a3b8' }}>
+          <div style={{ fontSize: '32px' }}>❄️</div>
+          <div style={{ fontSize: '14px', marginTop: '8px' }}>No connection selected</div>
+          <Link href="/connections" style={{ display: 'inline-block', marginTop: '12px', color: '#2563eb', textDecoration: 'none', fontWeight: 500 }}>Add a Snowflake connection →</Link>
         </div>
       )}
     </div>
   )
 }
 
-const card: React.CSSProperties = { background: '#ffffff', borderRadius: '12px', padding: '18px 20px', border: '1px solid #ebe8df' }
+const card: React.CSSProperties     = { background: '#ffffff', borderRadius: '12px', padding: '18px 20px', border: '1px solid #ebe8df' }
 const cardLabel: React.CSSProperties = { fontSize: '12px', color: '#64748b', marginBottom: '10px', fontWeight: 500 }

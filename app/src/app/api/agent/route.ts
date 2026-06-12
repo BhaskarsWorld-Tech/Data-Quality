@@ -3,10 +3,21 @@ import Anthropic from '@anthropic-ai/sdk'
 import { store } from '@/lib/store'
 import { generateId } from '@/lib/utils'
 import { Connection, Rule } from '@/lib/types'
+import { resolveApiKeyAsync } from '@/lib/agentConfig'
 
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY
-})
+export const runtime  = 'nodejs'
+export const dynamic  = 'force-dynamic'
+
+/** Resolve the API key fresh on every request: Cloudflare secret first,
+ *  process.env second, persisted UI-saved key third. */
+async function getApiKey(): Promise<string> {
+  return resolveApiKeyAsync()
+}
+
+/** Validate that we have a plausibly-correct Anthropic key. */
+function isValidKey(k: string): boolean {
+  return k.length >= 20 && k.startsWith('sk-ant-')
+}
 
 const tools: Anthropic.Tool[] = [
   {
@@ -101,7 +112,7 @@ const tools: Anthropic.Tool[] = [
 async function executeTool(toolName: string, input: Record<string, unknown>): Promise<unknown> {
   switch (toolName) {
     case 'list_connections': {
-      const connections = store.connections.getAll()
+      const connections = await store.connections.getAll()
       return { connections, total: connections.length }
     }
     case 'create_connection': {
@@ -117,15 +128,15 @@ async function executeTool(toolName: string, input: Record<string, unknown>): Pr
         status: 'inactive',
         createdAt: new Date().toISOString()
       }
-      store.connections.create(conn)
+      await store.connections.create(conn)
       return { success: true, connection: conn, message: `Connection "${conn.name}" created successfully!` }
     }
     case 'list_rules': {
-      let rules = store.rules.getAll()
+      let rules = await store.rules.getAll()
       if (input.category) rules = rules.filter(r => r.category === input.category)
       if (input.connectionId) rules = rules.filter(r => r.connectionId === input.connectionId)
       if (input.enabled !== undefined) rules = rules.filter(r => r.enabled === input.enabled)
-      const connections = store.connections.getAll()
+      const connections = await store.connections.getAll()
       const enriched = rules.map(r => ({
         ...r,
         connectionName: connections.find(c => c.id === r.connectionId)?.name || 'Unknown'
@@ -147,11 +158,11 @@ async function executeTool(toolName: string, input: Record<string, unknown>): Pr
         severity: input.severity as Rule['severity'],
         createdAt: new Date().toISOString()
       }
-      store.rules.create(rule)
+      await store.rules.create(rule)
       return { success: true, rule, message: `Rule "${rule.name}" created successfully!` }
     }
     case 'toggle_rule': {
-      const updated = store.rules.update(input.ruleId as string, { enabled: input.enabled as boolean })
+      const updated = await store.rules.update(input.ruleId as string, { enabled: input.enabled as boolean })
       if (!updated) return { error: 'Rule not found' }
       return { success: true, rule: updated, message: `Rule "${updated.name}" ${updated.enabled ? 'enabled' : 'disabled'}` }
     }
@@ -175,7 +186,7 @@ async function executeTool(toolName: string, input: Record<string, unknown>): Pr
       }
     }
     case 'get_report': {
-      const latest = store.reports.getLatest()
+      const latest = await store.reports.getLatest()
       if (!latest) return { message: 'No reports found. Run a quality check first.' }
       return {
         report: {
@@ -194,9 +205,9 @@ async function executeTool(toolName: string, input: Record<string, unknown>): Pr
       }
     }
     case 'get_dashboard_stats': {
-      const connections = store.connections.getAll()
-      const rules = store.rules.getAll()
-      const latest = store.reports.getLatest()
+      const connections = await store.connections.getAll()
+      const rules = await store.rules.getAll()
+      const latest = await store.reports.getLatest()
       return {
         totalConnections: connections.length,
         activeConnections: connections.filter(c => c.status === 'active').length,
@@ -220,12 +231,22 @@ async function executeTool(toolName: string, input: Record<string, unknown>): Pr
 export async function POST(req: NextRequest) {
   const { messages } = await req.json()
 
-  if (!process.env.ANTHROPIC_API_KEY) {
+  const apiKey = await getApiKey()
+  if (!apiKey) {
     return NextResponse.json({
-      response: "⚠️ **API Key not configured.** Please add your `ANTHROPIC_API_KEY` to the `.env.local` file to enable the AI Agent.\n\nI can still show you around the app! Try the sidebar to explore Connections, Rules, and Reports.",
+      response: "⚠️ **API Key not found.** Two ways to fix:\n\n1. **In the app (easiest)** — go to **Settings → API Keys → Anthropic AI Agent** and paste your key.\n2. **Or via env file** — add `ANTHROPIC_API_KEY=sk-ant-…` to `.env.local` in the project root, then **restart the Next.js server**. Note: an empty `ANTHROPIC_API_KEY` set in your shell will override `.env.local` — `unset ANTHROPIC_API_KEY` first.\n\nI can still show you around the app! Try the sidebar to explore Connections, Rules, and Reports.",
       toolsUsed: []
     })
   }
+  if (!isValidKey(apiKey)) {
+    return NextResponse.json({
+      response: `⚠️ **API Key looks malformed.** Expected something starting with \`sk-ant-\` and at least 20 chars; got ${apiKey.length} chars starting with \`${apiKey.slice(0, 6)}…\`. Double-check \`.env.local\` for stray quotes, spaces, or line breaks, then restart the server.`,
+      toolsUsed: []
+    })
+  }
+
+  // Build the client per-request so a key swap takes effect on next call.
+  const anthropic = new Anthropic({ apiKey })
 
   const systemPrompt = `You are DataGuard AI, an expert Data Quality assistant. You help users manage their data quality platform by:
 
@@ -250,6 +271,7 @@ Format responses with markdown for readability. Use emojis sparingly to highligh
   const toolsUsed: string[] = []
   let currentMessages = [...anthropicMessages]
 
+  try {
   for (let i = 0; i < 5; i++) {
     const response = await anthropic.messages.create({
       model: 'claude-opus-4-5',
@@ -288,6 +310,36 @@ Format responses with markdown for readability. Use emojis sparingly to highligh
       break
     }
   }
+  } catch (err: unknown) {
+    const e = err as { status?: number; message?: string }
+    if (e.status === 401) {
+      return NextResponse.json({
+        response: '⚠️ **Anthropic rejected the API key (HTTP 401).** The key in `.env.local` is invalid, expired, or revoked. Generate a new one at console.anthropic.com → API Keys, paste it into `.env.local`, then restart the server.',
+        toolsUsed,
+      })
+    }
+    if (e.status === 429) {
+      return NextResponse.json({
+        response: '⚠️ **Rate limited by Anthropic (HTTP 429).** Wait a few seconds and try again. If this happens often, check your usage at console.anthropic.com.',
+        toolsUsed,
+      })
+    }
+    return NextResponse.json({
+      response: `⚠️ **Agent error:** ${e.message ?? 'unknown error'}${e.status ? ` (HTTP ${e.status})` : ''}`,
+      toolsUsed,
+    })
+  }
 
   return NextResponse.json({ response: finalResponse, toolsUsed })
+}
+
+/** GET /api/agent — quick health check used by the UI to detect missing/invalid keys. */
+export async function GET() {
+  const k = await getApiKey()
+  return NextResponse.json({
+    configured: k.length > 0,
+    valid:      isValidKey(k),
+    keyLength:  k.length,
+    keyPrefix:  k ? k.slice(0, 7) : null,
+  })
 }
