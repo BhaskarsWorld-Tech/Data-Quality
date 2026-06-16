@@ -290,8 +290,8 @@ export default function ReportsClient({ initialReports }: { initialReports: Repo
                             <span>{r.ruleName}</span>
                             {r.scope && (
                               r.scope === 'generic'
-                                ? <span title="Came from a generic rule that fans out across every table" style={{ background: '#f5f3ff', color: '#7c3aed', padding: '1px 6px', borderRadius: '20px', fontSize: '9.5px', fontWeight: 700, letterSpacing: '0.04em' }}>🌐 GENERIC</span>
-                                : <span title="Came from a rule targeting one specific table/column" style={{ background: '#eff6ff', color: '#1d4ed8', padding: '1px 6px', borderRadius: '20px', fontSize: '9.5px', fontWeight: 700, letterSpacing: '0.04em' }}>🎯 SPECIFIC</span>
+                                ? <span title="Data quality rule — applies to every table in the schema" style={{ background: '#f5f3ff', color: '#7c3aed', padding: '1px 6px', borderRadius: '20px', fontSize: '9.5px', fontWeight: 700, letterSpacing: '0.04em' }}>🛡 DQ RULE</span>
+                                : <span title="Business rule — targets one specific table/column" style={{ background: '#eff6ff', color: '#1d4ed8', padding: '1px 6px', borderRadius: '20px', fontSize: '9.5px', fontWeight: 700, letterSpacing: '0.04em' }}>💼 BUSINESS RULE</span>
                             )}
                           </div>
                         </td>

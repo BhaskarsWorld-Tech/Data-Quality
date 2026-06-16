@@ -281,8 +281,8 @@ export default function RulesClient({ initialRules, connections }: Props) {
         <span style={{ fontSize: '11px', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', marginRight: '4px' }}>Scope</span>
         {([
           { k: 'all',      label: '🔍 All Rules', val: rules.length,  color: '#0f172a', desc: '' },
-          { k: 'generic',  label: '🌐 Generic',   val: genericCount,  color: '#7c3aed', desc: 'apply to every table in the schema' },
-          { k: 'specific', label: '🎯 Specific',  val: specificCount, color: '#1d4ed8', desc: 'target one specific table or column' },
+          { k: 'generic',  label: '🛡 DQ Rules',       val: genericCount,  color: '#7c3aed', desc: 'data quality rules that apply across every table in the schema' },
+          { k: 'specific', label: '💼 Business Rules', val: specificCount, color: '#1d4ed8', desc: 'business rules that target one specific table or column' },
         ] as const).map(s => {
           const active = scopeFilter === s.k
           return (
@@ -361,8 +361,8 @@ export default function RulesClient({ initialRules, connections }: Props) {
                     <span style={{ fontWeight: 700, color: '#0f172a', fontSize: '14px' }}>{rule.name}</span>
                     <span style={{ background: sev.bg, color: sev.color, padding: '1px 8px', borderRadius: '20px', fontSize: '11px', fontWeight: 600 }}>{sev.label}</span>
                     {isGenericRule(rule)
-                      ? <span title="Applies to every table in the schema" style={{ background: '#f5f3ff', color: '#7c3aed', padding: '1px 8px', borderRadius: '20px', fontSize: '10.5px', fontWeight: 700, letterSpacing: '0.04em' }}>🌐 GENERIC</span>
-                      : <span title="Applies to one specific table or column" style={{ background: '#eff6ff', color: '#1d4ed8', padding: '1px 8px', borderRadius: '20px', fontSize: '10.5px', fontWeight: 700, letterSpacing: '0.04em' }}>🎯 SPECIFIC</span>}
+                      ? <span title="Data quality rule — applies to every table in the schema" style={{ background: '#f5f3ff', color: '#7c3aed', padding: '1px 8px', borderRadius: '20px', fontSize: '10.5px', fontWeight: 700, letterSpacing: '0.04em' }}>🛡 DQ RULE</span>
+                      : <span title="Business rule — applies to one specific table or column" style={{ background: '#eff6ff', color: '#1d4ed8', padding: '1px 8px', borderRadius: '20px', fontSize: '10.5px', fontWeight: 700, letterSpacing: '0.04em' }}>💼 BUSINESS RULE</span>}
                   </div>
                   <div style={{ fontSize: '12px', color: '#64748b' }}>{rule.description}</div>
                   <div style={{ display: 'flex', gap: '12px', marginTop: '6px' }}>
@@ -506,7 +506,7 @@ export default function RulesClient({ initialRules, connections }: Props) {
                     onChange={e => setForm(f => ({ ...f, tableName: e.target.checked ? '*' : '', columnName: e.target.checked ? '' : f.columnName }))}
                     style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#7c3aed' }} />
                   <span style={{ fontSize: '13px', color: '#1a1a1a', fontWeight: 600 }}>
-                    🌐 Generic rule — apply to <strong>every table</strong> in the schema
+                    🛡 DQ Rule — applies to <strong>every table</strong> in the schema (deselect for a business rule targeting one table)
                   </span>
                 </label>
                 <div style={{ fontSize: '11px', color: '#94a3b8', marginLeft: '24px', marginTop: '2px' }}>

@@ -85,24 +85,14 @@ export function ConnectionToolbar({ selectedId, onChange, onRefresh, refreshing,
     }
   }
 
-  // Combined Snowsight-style DB+Schema picker (databases left, schemas right)
-  const [ctxOpen,   setCtxOpen]   = useState(false)
-  const [dbFilter,  setDbFilter]  = useState('')
-  const [scFilter,  setScFilter]  = useState('')
-  const [whOpen,    setWhOpen]    = useState(false)
-  const ctxRef = useRef<HTMLDivElement>(null)
-  const whRef  = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    function close(e: MouseEvent) {
-      if (ctxRef.current && !ctxRef.current.contains(e.target as Node)) setCtxOpen(false)
-      if (whRef.current  && !whRef.current.contains(e.target as Node))  setWhOpen(false)
-    }
-    document.addEventListener('mousedown', close)
-    return () => document.removeEventListener('mousedown', close)
-  }, [])
+  // Per-column search filters inside the unified connection dropdown
+  const [whFilter, setWhFilter] = useState('')
+  const [dbFilter, setDbFilter] = useState('')
+  const [scFilter, setScFilter] = useState('')
 
-  const dbFiltered = databases.filter(d => d.toLowerCase().includes(dbFilter.toLowerCase()))
-  const scFiltered = schemas.filter(s   => s.toLowerCase().includes(scFilter.toLowerCase()))
+  const whFiltered = warehouses.filter(w => w.toLowerCase().includes(whFilter.toLowerCase()))
+  const dbFiltered = databases .filter(d => d.toLowerCase().includes(dbFilter.toLowerCase()))
+  const scFiltered = schemas   .filter(s => s.toLowerCase().includes(scFilter.toLowerCase()))
 
   return (
     <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -128,75 +118,79 @@ export function ConnectionToolbar({ selectedId, onChange, onRefresh, refreshing,
         {open && (
           <div style={{
             position: 'absolute', top: 'calc(100% + 6px)', right: 0,
-            background: '#fff', border: '1px solid #e2e8f0', borderRadius: '10px',
-            boxShadow: '0 8px 24px rgba(0,0,0,0.12)', zIndex: 100,
-            minWidth: '280px', overflow: 'hidden',
+            background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px',
+            boxShadow: '0 12px 32px rgba(0,0,0,0.14)', zIndex: 200,
+            width: '780px', overflow: 'hidden',
           }}>
-            <div style={{ padding: '8px 14px', fontSize: '10px', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.08em', borderBottom: '1px solid #f3f1ea' }}>
-              {connections.length} CONNECTION{connections.length === 1 ? '' : 'S'}
+            {/* Connection list (only show if > 1 to save space) */}
+            <div style={{ padding: '8px 14px', fontSize: '10px', color: '#94a3b8', fontWeight: 700, letterSpacing: '0.08em', borderBottom: '1px solid #f3f1ea', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>{connections.length} CONNECTION{connections.length === 1 ? '' : 'S'} · CONTEXT</span>
+              <Link href="/settings" style={{ fontSize: '11px', color: '#2563eb', textDecoration: 'none', fontWeight: 500, textTransform: 'none', letterSpacing: 0 }}>
+                + Manage
+              </Link>
             </div>
-            {connections.map(c => {
-              const isActive = c.id === selectedId
-              const wh = isActive && conn?.warehouse ? conn.warehouse : (c.warehouse ?? '')
-              const sc = isActive && conn?.schema    ? conn.schema    : (c.schema    ?? '')
-              return (
-                <button key={c.id} onClick={() => { onChange(c.id); setOpen(false) }} style={{
-                  display: 'block', width: '100%', padding: '10px 14px', textAlign: 'left',
-                  background: isActive ? '#eff6ff' : '#fff', border: 'none', cursor: 'pointer',
-                  borderBottom: '1px solid #f8fafc',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 600, color: isActive ? '#1d4ed8' : '#1a1a1a' }}>
-                    <span>❄️</span>
-                    <span style={{ flex: 1 }}>{c.name}</span>
-                    {c.status === 'active' && <span style={{ color: '#16a34a', fontSize: '9px' }}>● active</span>}
-                    {isActive && <span style={{ color: '#2563eb', fontSize: '13px' }}>✓</span>}
+
+            {connections.length > 1 && (
+              <div style={{ borderBottom: '1px solid #f3f1ea' }}>
+                {connections.map(c => {
+                  const isActive = c.id === selectedId
+                  return (
+                    <button key={c.id} onClick={() => onChange(c.id)} style={{
+                      display: 'flex', alignItems: 'center', gap: '8px', width: '100%', padding: '8px 14px', textAlign: 'left',
+                      background: isActive ? '#eff6ff' : '#fff', border: 'none', cursor: 'pointer',
+                    }}>
+                      <span>❄️</span>
+                      <span style={{ flex: 1, fontSize: '13px', fontWeight: 600, color: isActive ? '#1d4ed8' : '#1a1a1a' }}>{c.name}</span>
+                      {c.status === 'active' && <span style={{ color: '#16a34a', fontSize: '9px' }}>● active</span>}
+                      {isActive && <span style={{ color: '#2563eb', fontSize: '13px' }}>✓</span>}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* 3-column Warehouse / Database / Schema picker */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr' }}>
+              {/* ── WAREHOUSES column ───────────────────────────────────────── */}
+              <div style={{ borderRight: '1px solid #f1f5f9', display: 'flex', flexDirection: 'column', maxHeight: '380px' }}>
+                <div style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#f8fafc', borderRadius: '6px', padding: '6px 10px' }}>
+                    <span style={{ fontSize: '12px', color: '#94a3b8' }}>🔍</span>
+                    <input value={whFilter} onChange={e => setWhFilter(e.target.value)}
+                      placeholder="Warehouses"
+                      style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: '12.5px', flex: 1, color: '#0f172a' }} />
                   </div>
-                  {(wh || sc) && (
-                    <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px', marginLeft: '22px', fontFamily: 'monospace' }}>
-                      <span style={{ color: '#475569' }}>Warehouse:</span> {wh || '—'}
-                      <span style={{ color: '#cbd5e1', margin: '0 6px' }}>·</span>
-                      <span style={{ color: '#475569' }}>Schema:</span> {sc || '—'}
+                </div>
+                <div style={{ overflowY: 'auto', flex: 1 }}>
+                  {whFiltered.length === 0 && (
+                    <div style={{ padding: '14px', fontSize: '12px', color: '#94a3b8', textAlign: 'center' }}>
+                      {discovering ? 'Loading…' : 'No warehouses'}
                     </div>
                   )}
-                </button>
-              )
-            })}
-            <Link href="/settings" style={{ display: 'block', padding: '10px 14px', fontSize: '12px', color: '#2563eb', textDecoration: 'none', fontWeight: 500 }}>
-              + Manage connections
-            </Link>
-          </div>
-        )}
-      </div>
+                  {whFiltered.map(w => {
+                    const isActive = w === curWarehouse
+                    return (
+                      <button key={w}
+                        onClick={() => applyContext({ warehouse: w })}
+                        disabled={switching === 'warehouse'}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '8px', width: '100%',
+                          padding: '8px 14px', textAlign: 'left', border: 'none', cursor: 'pointer',
+                          background: isActive ? '#eff6ff' : '#fff',
+                          color: isActive ? '#1d4ed8' : '#0f172a',
+                          fontWeight: isActive ? 700 : 500, fontSize: '12.5px',
+                        }}>
+                        <span style={{ fontSize: '12px', opacity: 0.7 }}>⚙</span>
+                        <span style={{ flex: 1 }}>{w}</span>
+                        {isActive && <span style={{ color: '#2563eb', fontSize: '13px' }}>✓</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
 
-      {/* Snowsight-style combined picker — Database (left) + Schema (right) in one pane */}
-      {selectedId && (
-        <div ref={ctxRef} style={{ position: 'relative' }}>
-          <button onClick={() => setCtxOpen(o => !o)} disabled={discovering} style={{
-            background: '#fff', border: '1px solid #e2e8f0', padding: '7px 12px',
-            borderRadius: '8px', fontSize: '12.5px', color: '#0f172a',
-            fontWeight: 600, cursor: discovering ? 'wait' : 'pointer',
-            display: 'flex', alignItems: 'center', gap: '8px',
-            boxShadow: ctxOpen ? '0 0 0 3px #dbeafe' : 'none',
-            opacity: discovering ? 0.6 : 1,
-          }}
-          title="Switch database / schema">
-            <span style={{ fontSize: '13px' }}>🗄</span>
-            <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 500 }}>DB·Schema</span>
-            <span style={{ color: '#0f172a' }}>{curDatabase || '—'}</span>
-            <span style={{ color: '#cbd5e1' }}>·</span>
-            <span style={{ color: '#0f172a' }}>{curSchema || '—'}</span>
-            <span style={{ fontSize: '10px', color: '#94a3b8', transform: ctxOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▾</span>
-          </button>
-
-          {ctxOpen && (
-            <div style={{
-              position: 'absolute', top: 'calc(100% + 6px)', right: 0,
-              background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px',
-              boxShadow: '0 12px 32px rgba(0,0,0,0.14)', zIndex: 200,
-              width: '560px', display: 'grid', gridTemplateColumns: '1fr 1fr', overflow: 'hidden',
-            }}>
               {/* ── DATABASES column ────────────────────────────────────────── */}
-              <div style={{ borderRight: '1px solid #f1f5f9', display: 'flex', flexDirection: 'column', maxHeight: '360px' }}>
+              <div style={{ borderRight: '1px solid #f1f5f9', display: 'flex', flexDirection: 'column', maxHeight: '380px' }}>
                 <div style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#f8fafc', borderRadius: '6px', padding: '6px 10px' }}>
                     <span style={{ fontSize: '12px', color: '#94a3b8' }}>🔍</span>
@@ -234,7 +228,7 @@ export function ConnectionToolbar({ selectedId, onChange, onRefresh, refreshing,
               </div>
 
               {/* ── SCHEMAS column ──────────────────────────────────────────── */}
-              <div style={{ display: 'flex', flexDirection: 'column', maxHeight: '360px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', maxHeight: '380px' }}>
                 <div style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#f8fafc', borderRadius: '6px', padding: '6px 10px' }}>
                     <span style={{ fontSize: '12px', color: '#94a3b8' }}>🔍</span>
@@ -256,7 +250,7 @@ export function ConnectionToolbar({ selectedId, onChange, onRefresh, refreshing,
                     const isActive = s === curSchema
                     return (
                       <button key={s}
-                        onClick={() => { applyContext({ schema: s }); setCtxOpen(false) }}
+                        onClick={() => { applyContext({ schema: s }); setOpen(false) }}
                         disabled={switching === 'schema'}
                         style={{
                           display: 'flex', alignItems: 'center', gap: '8px', width: '100%',
@@ -274,61 +268,9 @@ export function ConnectionToolbar({ selectedId, onChange, onRefresh, refreshing,
                 </div>
               </div>
             </div>
-          )}
-        </div>
-      )}
-
-      {/* Warehouse picker — separate compact dropdown */}
-      {selectedId && (
-        <div ref={whRef} style={{ position: 'relative' }}>
-          <button onClick={() => setWhOpen(o => !o)} disabled={discovering} style={{
-            background: '#fff', border: '1px solid #e2e8f0', padding: '7px 12px',
-            borderRadius: '8px', fontSize: '12.5px', color: '#0f172a',
-            fontWeight: 600, cursor: discovering ? 'wait' : 'pointer',
-            display: 'flex', alignItems: 'center', gap: '8px',
-            boxShadow: whOpen ? '0 0 0 3px #dbeafe' : 'none',
-          }}
-          title="Switch warehouse">
-            <span style={{ fontSize: '13px' }}>⚙</span>
-            <span style={{ color: '#64748b', fontSize: '11px', fontWeight: 500 }}>WH</span>
-            <span>{curWarehouse || '—'}</span>
-            <span style={{ fontSize: '10px', color: '#94a3b8', transform: whOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▾</span>
-          </button>
-          {whOpen && (
-            <div style={{
-              position: 'absolute', top: 'calc(100% + 6px)', right: 0,
-              background: '#fff', border: '1px solid #e2e8f0', borderRadius: '10px',
-              boxShadow: '0 8px 24px rgba(0,0,0,0.12)', zIndex: 200,
-              minWidth: '220px', maxHeight: '320px', overflowY: 'auto',
-            }}>
-              {warehouses.length === 0 && (
-                <div style={{ padding: '14px', fontSize: '12px', color: '#94a3b8', textAlign: 'center' }}>
-                  {discovering ? 'Loading…' : 'No warehouses'}
-                </div>
-              )}
-              {warehouses.map(w => {
-                const isActive = w === curWarehouse
-                return (
-                  <button key={w}
-                    onClick={() => { applyContext({ warehouse: w }); setWhOpen(false) }}
-                    disabled={switching === 'warehouse'}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: '8px', width: '100%',
-                      padding: '8px 14px', textAlign: 'left', border: 'none', cursor: 'pointer',
-                      background: isActive ? '#eff6ff' : '#fff',
-                      color: isActive ? '#1d4ed8' : '#0f172a',
-                      fontWeight: isActive ? 700 : 500, fontSize: '12.5px',
-                    }}>
-                    <span style={{ fontSize: '12px', opacity: 0.7 }}>⚙</span>
-                    <span style={{ flex: 1 }}>{w}</span>
-                    {isActive && <span style={{ color: '#2563eb', fontSize: '13px' }}>✓</span>}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
       <button onClick={onRefresh} disabled={refreshing || !selectedId} style={{
         background: '#fff', border: '1px solid #e2e8f0', padding: '7px 12px',
